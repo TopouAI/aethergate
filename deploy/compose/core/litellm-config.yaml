@@ -1,0 +1,26 @@
+# AetherGate LiteLLM configuration
+#
+# Add models through the LiteLLM Admin UI after the stack starts.
+# Models stored in PostgreSQL are enabled by STORE_MODEL_IN_DB=True.
+
+model_list: []
+
+router_settings:
+  routing_strategy: simple-shuffle
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+  set_verbose: false
+  # Do not enable response caching until tenant isolation and cache-key
+  # requirements have been designed and tested.
+  cache: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  ui_access_mode: admin_only

@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem in AetherGate
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private customer data, or undisclosed security vulnerabilities.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What happened?
+      description: Explain the observed behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe and repeatable example.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, deployment type, browser, and relevant dependency versions.
+

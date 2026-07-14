@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose an AetherGate product or platform improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What enterprise, operator, or developer problem needs to be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result without prescribing an implementation where possible.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Console
+        - Go API
+        - Worker and events
+        - LiteLLM integration
+        - Analytics
+        - Metering and billing
+        - Deployment and operations
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints

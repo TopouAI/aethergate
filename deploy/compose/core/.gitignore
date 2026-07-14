@@ -1,0 +1,8 @@
+.env
+aethergate-backend.env
+secrets/*
+!secrets/.gitkeep
+backups/*
+!backups/.gitkeep
+*.dump
+*.log
