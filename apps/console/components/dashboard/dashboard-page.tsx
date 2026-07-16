@@ -175,7 +175,7 @@ export function DashboardPage() {
             <Table.ScrollContainer>
               <Table.Content aria-label="Live LLM requests" className="min-w-[900px]">
                 <Table.Header>
-                  <Table.Column id="time" className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">Time</Table.Column>
+                  <Table.Column id="time" isRowHeader className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">Time</Table.Column>
                   <Table.Column id="model" className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">Model</Table.Column>
                   <Table.Column id="project" className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">Project</Table.Column>
                   <Table.Column id="status" className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">Status</Table.Column>

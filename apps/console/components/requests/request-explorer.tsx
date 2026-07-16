@@ -220,7 +220,7 @@ export function RequestExplorer() {
               <Table.ScrollContainer>
                 <Table.Content aria-label="LLM request explorer" className="min-w-[1020px]">
                   <Table.Header>
-                    {[["time", "Time"], ["model", "Model / Provider"], ["context", "Project / User"], ["status", "Status"], ["tokens", "Tokens"], ["latency", "Latency"], ["cost", "Cost"], ["open", ""]].map(([id, label]) => <Table.Column key={id} id={id} className={`bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase ${["tokens", "latency", "cost"].includes(id) ? "text-right" : ""}`}>{label}</Table.Column>)}
+                    {[["time", "Time"], ["model", "Model / Provider"], ["context", "Project / User"], ["status", "Status"], ["tokens", "Tokens"], ["latency", "Latency"], ["cost", "Cost"], ["open", ""]].map(([id, label]) => <Table.Column key={id} id={id} isRowHeader={id === "time"} className={`bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase ${["tokens", "latency", "cost"].includes(id) ? "text-right" : ""}`}>{label}</Table.Column>)}
                   </Table.Header>
                   <Table.Body>
                     {filteredRequests.map((request) => (

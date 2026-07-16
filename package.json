@@ -6,14 +6,13 @@
     "apps/console"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @aethergate/console",
-    "build": "npm run build --workspace @aethergate/console",
-    "lint": "npm run lint --workspace @aethergate/console",
-    "typecheck": "npm run typecheck --workspace @aethergate/console"
+    "dev": "cd apps/console && next dev",
+    "build": "cd apps/console && next build",
+    "lint": "cd apps/console && eslint .",
+    "typecheck": "cd apps/console && tsc --noEmit"
   },
   "engines": {
     "node": ">=20"
   },
   "packageManager": "npm@11.12.1"
 }
-

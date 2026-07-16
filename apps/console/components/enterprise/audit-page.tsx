@@ -322,7 +322,7 @@ export function AuditPage() {
                           ["time", "Created"],
                           ["open", ""],
                         ].map(([id, label]) => (
-                          <Table.Column key={id} id={id} className="bg-white/[0.018] text-[10px] uppercase text-slate-600">
+                          <Table.Column key={id} id={id} isRowHeader={id === "event"} className="bg-white/[0.018] text-[10px] uppercase text-slate-600">
                             {label}
                           </Table.Column>
                         ))}
@@ -476,7 +476,7 @@ export function AuditPage() {
                       ["requested", "Requested"],
                       ["retry", ""],
                     ].map(([id, label]) => (
-                      <Table.Column key={id} id={id} className="bg-white/[0.018] text-[10px] uppercase text-slate-600">{label}</Table.Column>
+                      <Table.Column key={id} id={id} isRowHeader={id === "export"} className="bg-white/[0.018] text-[10px] uppercase text-slate-600">{label}</Table.Column>
                     ))}
                   </Table.Header>
                   <Table.Body>
