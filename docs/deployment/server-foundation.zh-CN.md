@@ -53,12 +53,14 @@ DATABASE_URL=postgresql://aethergate_user:<password>@pgbouncer:5432/aethergate
 DIRECT_URL=postgresql://aethergate_user:<password>@postgres:5432/aethergate
 LITELLM_BASE_URL=http://litellm:4000
 LITELLM_MASTER_KEY=<server-side-master-key>
+AETHERGATE_VAULT_KEK=<32字节随机值的标准Base64>
 ```
 
 - `DATABASE_URL`：日常查询，走 PgBouncer transaction 池；
 - `DIRECT_URL`：数据库迁移等需要直连或会话语义的操作；
 - `LITELLM_BASE_URL`：Compose 内部地址；
 - `LITELLM_MASTER_KEY`：仅后端使用，禁止发送给浏览器。
+- `AETHERGATE_VAULT_KEK`：持久化 Vault 写入使用的密钥加密密钥，必须是恰好 32 字节随机值的标准 Base64，仅由 Go API 和获准内部 Worker 加载。
 
 LiteLLM 首次启动和数据库结构操作默认直连 PostgreSQL。只有在固定版本完成兼容性测试后，才考虑切换到 PgBouncer session 池。迁移不要走 transaction 池。
 
@@ -117,8 +119,10 @@ chmod +x init-env.sh backup.sh verify.sh
 - LiteLLM Master Key 与 Salt Key；
 - LiteLLM UI 登录凭据；
 - AetherGate 后端连接环境。
+- 32 字节 AetherGate Vault KEK，使用标准 Base64 编码并保存到服务器密钥边界。
 
 LiteLLM Salt Key 用于保护已保存的供应商凭据，开始保存模型凭据后不要随意重新生成。
+当前 AetherGate Vault 使用单一 `env-v1` 包封密钥。必须通过获准的密钥管理系统备份；Vault 已有数据后不得直接替换，否则在实现并验证多密钥重包流程前，已有数据密钥将无法解密。
 
 启动前检查：
 
@@ -169,11 +173,71 @@ http://<服务器公网IP>:4000/health/readiness
 
 Go API 与基础服务位于同一 Compose 网络时，使用生成的内部连接值，并通过 Compose `env_file` 或后续密钥机制加载。不要把这些值复制到 Next.js 客户端配置中。
 
+LiteLLM 集成变量只配置在 Go API 服务端环境中：
+
+```dotenv
+LITELLM_BASE_URL=http://litellm:4000
+LITELLM_MASTER_KEY=<仅服务端使用的-master-key>
+```
+
+`LITELLM_BASE_URL` 必须是绝对 HTTP(S) 地址，不能包含内嵌凭据、查询串或 fragment。若健康端点不要求认证，可以不设置 `LITELLM_MASTER_KEY`；一旦设置，它也只能保留在服务端，绝不能返回 Console。两个值都不得写入 `NEXT_PUBLIC_*` 变量。
+
+Go API 启动后，先检查脱敏配置状态，再从 API 所在网络执行真实探测：
+
+```bash
+curl -fsS http://aethergate-api:8080/api/v1/integrations/litellm/status
+curl -fsS -X POST http://aethergate-api:8080/api/v1/integrations/litellm/verify
+```
+
+验证端点只调用 LiteLLM 的 `/health/liveliness` 与 `/health/readiness`，拒绝重定向，限制并丢弃响应正文，只返回状态、延迟和标准化错误证据，不会访问 LiteLLM 数据库内部表。`overall: ready` 只代表服务健康门禁通过；上线前仍需测试真实流式请求、取消、Virtual Key 策略、路由、用量归属和 Provider 故障行为。
+
 Go API 在开发电脑运行时，优先选择：
 
 1. 把 API 放进服务器 Compose 网络；
 2. 通过 SSH 隧道连接服务器本机 PgBouncer；
 3. 使用只能通过 VPN 或可信网络访问的独立开发数据库。
+
+Provider Health 执行需要额外的信任边界：
+
+- Go 控制面 API 只持久化探测任务并接收聚合后的观测结果；
+- 独立的 Provider Health Worker 从服务端密钥边界解析凭据，只对允许列表中的提供商发起探测，并记录结果；
+- Console 永远不接收提供商密钥，也不直接发起提供商探测；
+- 只有在配置 Worker 出站允许列表、超时、凭据访问、审计记录和重试上限后，才能启用自动探测调度。
+
+Scheduled Reports 执行使用独立的数据与交付边界：
+
+- Go 控制面 API 保存计划、按 IANA 时区计算下次运行时间，并写入运行队列记录；
+- 独立的 Reports Worker 领取定时、手动或重试任务，读取已授权的分析数据，生成 CSV/XLSX/PDF 文件，保存制品元数据，并交付给获准的邮件或 Slack 收件人；
+- 对象存储、SMTP 和 Slack 凭据只存在于服务端，不进入 Console 配置；
+- 只有在租户范围查询、对象保留策略、必要的恶意内容检查、签名下载、收件人授权、幂等性和重试限制配置完成后，才能启用 Reports Worker。
+
+外部通知投递使用独立的身份与出站边界：
+
+- Go 控制面 API 始终先创建接收人范围内的收件箱记录，并根据已校验的个人偏好，只写入排队、延后或抑制状态的外部投递记录；
+- 独立的 Notifications Worker 领取可执行记录，解析服务端批准的邮件、Slack、Teams 或 Webhook 连接器引用，执行幂等与重试限制，并写回投递结果证据；
+- 静默时段与摘要投递时间使用接收人的 IANA 时区计算，持久化时间仍统一为 UTC；
+- 连接器凭据与原始 Webhook 密钥不得进入 Console、通知偏好载荷或控制面日志；
+- 只有在接收人授权、目标允许列表、密钥轮换、模板转义、速率限制、退信/失败处理、重放保护、保留策略和审计记录配置完成后，才能启用外部通知投递。
+
+Enterprise Vault 使用独立的加密与解析边界：
+
+- 每个密钥版本生成新的 256 位随机数据密钥；密钥值和数据密钥分别使用 AES-256-GCM 保护，并把租户、密钥 ID 和版本作为认证附加数据；
+- Console 与公共 HTTP 响应只接收掩码元数据、指纹、版本、引用、轮换状态和访问证据，永不接收明文、密文、Nonce 或包封数据密钥；
+- 明文解析只存在于 Go 内部服务方法。Worker 必须提供操作者、工作负载、用途、请求 ID 和来源 IP，并把成功、拒绝或失败追加到不可变访问证据；
+- PostgreSQL 持久化写入在 `AETHERGATE_VAULT_KEK` 缺失或非法时关闭失败。KEK 不得进入 Git 或数据库备份，但必须在独立权限控制的获准密钥系统中备份；
+- 当前单一 `env-v1` 包封密钥不等于完整 KMS/密钥环。在重包、双密钥读取、回滚和恢复演练完成前，不得原地轮换；
+- Provider Health、Gateway、Webhook、Reports 和 Notifications Worker 只能解析明确授权范围的引用，且不得记录或持久化返回的明文；
+- 身份/RBAC、真实 PostgreSQL、真实 Worker 解析、外部 KMS/密钥环、备份恢复、撤销传播和泄露响应演练全部通过前，不得把 Vault 标记为已验证。
+
+审计证据使用不可变存储与特权 Worker 边界：
+
+- Go 控制面把操作者、动作、资源、结果、风险、请求/IP 上下文以及变更前后状态追加到租户独立的 SHA-256 前向哈希链；
+- PostgreSQL 应用角色不得拥有绕过 `audit_events` 防修改触发器的路径；对修改被拒或哈希链校验失败必须产生运维告警；
+- 只有 Audit Export Worker 可以领取已接受的导出任务、生成 CSV/JSONL 对象、计算 SHA-256 文件校验和，并写回行数、大小、对象键及成功/失败证据；
+- 导出存储桶必须私有、加密、按租户前缀隔离、配置生命周期，并使用短期授权访问；对象存储凭据不得进入 Console；
+- 保留期与法律保全是策略记录。物理清理必须由经过评审的特权分区保留 Worker 或分区删除流程执行，记录决策，并确保法律保全期间永不删除证据；
+- 修改结构或保留策略前必须备份审计分区、策略和导出证据，并在隔离环境恢复后重新校验哈希链；
+- 在身份/RBAC、租户范围读取、对象保留、幂等与重试、监控及恢复演练通过前，不得启用导出或物理清理。
 
 不要为了调试把 PostgreSQL 直接开放给整个互联网。
 

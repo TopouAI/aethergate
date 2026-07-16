@@ -1,0 +1,346 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Audit API
+  version: 0.1.0
+  description: Tenant-scoped immutable administrative and security events, SHA-256 chain verification, retention policy, legal hold, and isolated-worker export evidence.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Audit
+paths:
+  /api/v1/audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: actor, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resourceType, in: query, schema: { type: string } }
+        - { name: resourceId, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { $ref: "#/components/schemas/AuditOutcome" } }
+        - { name: riskLevel, in: query, schema: { $ref: "#/components/schemas/AuditRisk" } }
+        - { name: startAt, in: query, schema: { type: string, format: date-time } }
+        - { name: endAt, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Tenant-scoped audit events in newest-first order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventListResponse" }
+        "422":
+          description: A time filter is not valid RFC3339.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    post:
+      operationId: appendAuditEvent
+      tags: [Audit]
+      description: Internal control-plane append boundary. The authenticated actor must be supplied by trusted middleware when production authentication is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppendAuditEventRequest" }
+      responses:
+        "201":
+          description: Event appended to the tenant SHA-256 chain. No update or delete endpoint exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventResponse" }
+        "409":
+          description: Concurrent append conflicted with the current chain head; retry against the new head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Actor, resource, outcome, risk, IP address, or state validation failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/audit-events/verify:
+    get:
+      operationId: verifyAuditIntegrity
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+      responses:
+        "200":
+          description: Recomputed chain state. A valid HTTP response can still report valid=false and the first invalid event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditIntegrityResponse" }
+  /api/v1/audit-retention:
+    get:
+      operationId: getAuditRetentionPolicy
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+      responses:
+        "200":
+          description: Tenant policy or the safe 365-day default.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditRetentionResponse" }
+    put:
+      operationId: upsertAuditRetentionPolicy
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertAuditRetentionRequest" }
+      responses:
+        "200":
+          description: Retention and legal-hold policy saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditRetentionResponse" }
+        "422":
+          description: Retention is outside 30–2555 days or export format is unsupported.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/audit-exports:
+    get:
+      operationId: listAuditExports
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/AuditExportStatus" } }
+        - { name: format, in: query, schema: { $ref: "#/components/schemas/AuditExportFormat" } }
+      responses:
+        "200":
+          description: Export requests, worker state, object evidence, checksums, and retries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditExportListResponse" }
+    post:
+      operationId: queueAuditExport
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueueAuditExportRequest" }
+      responses:
+        "202":
+          description: Export accepted by the isolated Audit Export Worker queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditExportResponse" }
+        "422":
+          description: Format, period, or filter count validation failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/audit-exports/{exportID}/retry:
+    post:
+      operationId: retryAuditExport
+      tags: [Audit]
+      parameters:
+        - $ref: "#/components/parameters/ExportID"
+        - $ref: "#/components/parameters/OrganizationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestedBy: { type: string, format: email }
+      responses:
+        "202":
+          description: A parent-linked retry was accepted by the Audit Export Worker queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditExportResponse" }
+        "404":
+          description: Export evidence does not exist in this tenant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Only failed export evidence can be retried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+components:
+  parameters:
+    OrganizationID:
+      name: organizationId
+      in: query
+      schema: { type: string, default: org_topoai }
+    ExportID:
+      name: exportID
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    AuditOutcome:
+      type: string
+      enum: [success, failure, denied]
+    AuditRisk:
+      type: string
+      enum: [low, medium, high, critical]
+    AuditExportFormat:
+      type: string
+      enum: [csv, jsonl]
+    AuditExportStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, cancelled]
+    JSONState:
+      type: object
+      description: JSON object capped at 64 KiB by the service.
+      additionalProperties: true
+    AppendAuditEventRequest:
+      type: object
+      required: [organizationId, actorId, actorEmail, action, resourceType, resourceId, outcome, riskLevel, source, reason, requestId, ipAddress, userAgent, beforeState, afterState]
+      properties:
+        organizationId: { type: string }
+        actorId: { type: string, minLength: 1 }
+        actorEmail: { type: string, minLength: 1 }
+        action: { type: string, minLength: 1 }
+        resourceType: { type: string, minLength: 1 }
+        resourceId: { type: string, minLength: 1 }
+        outcome: { $ref: "#/components/schemas/AuditOutcome" }
+        riskLevel: { $ref: "#/components/schemas/AuditRisk" }
+        source: { type: string }
+        reason: { type: string }
+        requestId: { type: string }
+        ipAddress: { type: string }
+        userAgent: { type: string }
+        beforeState: { $ref: "#/components/schemas/JSONState" }
+        afterState: { $ref: "#/components/schemas/JSONState" }
+    AuditEvent:
+      allOf:
+        - $ref: "#/components/schemas/AppendAuditEventRequest"
+        - type: object
+          required: [id, previousHash, integrityHash, createdAt]
+          properties:
+            id: { type: string }
+            previousHash: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+            integrityHash: { type: string, pattern: "^[0-9a-f]{64}$" }
+            createdAt: { type: string, format: date-time }
+    AuditIntegrityResult:
+      type: object
+      required: [valid, eventCount, headHash, firstInvalidId]
+      properties:
+        valid: { type: boolean }
+        eventCount: { type: integer, minimum: 0 }
+        headHash: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+        firstInvalidId: { type: string }
+    AuditRetentionPolicy:
+      type: object
+      required: [organizationId, retentionDays, legalHold, exportFormat, updatedBy, updatedAt]
+      properties:
+        organizationId: { type: string }
+        retentionDays: { type: integer, minimum: 30, maximum: 2555 }
+        legalHold: { type: boolean }
+        exportFormat: { $ref: "#/components/schemas/AuditExportFormat" }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    UpsertAuditRetentionRequest:
+      type: object
+      required: [organizationId, retentionDays, legalHold, exportFormat, updatedBy]
+      properties:
+        organizationId: { type: string }
+        retentionDays: { type: integer, minimum: 30, maximum: 2555 }
+        legalHold: { type: boolean }
+        exportFormat: { $ref: "#/components/schemas/AuditExportFormat" }
+        updatedBy: { type: string }
+    QueueAuditExportRequest:
+      type: object
+      required: [organizationId, requestedBy, format, filters, periodStart, periodEnd]
+      properties:
+        organizationId: { type: string }
+        requestedBy: { type: string }
+        format: { $ref: "#/components/schemas/AuditExportFormat" }
+        filters:
+          type: object
+          maxProperties: 10
+          additionalProperties: { type: string }
+        periodStart: { type: string, format: date-time }
+        periodEnd: { type: string, format: date-time }
+    AuditExport:
+      type: object
+      required: [id, organizationId, requestedBy, format, status, filters, periodStart, periodEnd, rowCount, sizeBytes, objectKey, checksum, errorMessage, parentId, createdAt, completedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        requestedBy: { type: string }
+        format: { $ref: "#/components/schemas/AuditExportFormat" }
+        status: { $ref: "#/components/schemas/AuditExportStatus" }
+        filters:
+          type: object
+          additionalProperties: { type: string }
+        periodStart: { type: string, format: date-time }
+        periodEnd: { type: string, format: date-time }
+        rowCount: { type: integer, format: int64, minimum: 0 }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        objectKey: { type: string }
+        checksum: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+        errorMessage: { type: string }
+        parentId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+    ResponseMeta:
+      type: object
+      additionalProperties: true
+      properties:
+        source: { type: string }
+    AuditEventResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/AuditEvent" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    AuditEventListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/ResponseMeta"
+            - type: object
+              properties: { count: { type: integer, minimum: 0 } }
+    AuditIntegrityResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/AuditIntegrityResult" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    AuditRetentionResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/AuditRetentionPolicy" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    AuditExportResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/AuditExport" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    AuditExportListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/AuditExport" } }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/ResponseMeta"
+            - type: object
+              properties: { count: { type: integer, minimum: 0 } }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

@@ -1,0 +1,243 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Control Plane API
+  version: 0.1.0
+  description: |
+    Initial executable contract for the AetherGate Go control plane.
+    Responses marked with `development-seed` are bootstrap data and not production persistence.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: System
+  - name: Observability
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [System]
+      summary: Report liveness
+      responses:
+        "200":
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      operationId: getReadiness
+      tags: [System]
+      summary: Report readiness
+      responses:
+        "200":
+          description: Service dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/v1/overview:
+    get:
+      operationId: getOverview
+      tags: [Observability]
+      summary: Get top-level usage metrics
+      responses:
+        "200":
+          description: Current overview metrics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewResponse"
+  /api/v1/requests:
+    get:
+      operationId: listRequests
+      tags: [Observability]
+      summary: List model requests
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive search over ID, model, provider, project, user, and prompt.
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/RequestStatus"
+              - type: string
+                const: all
+        - name: project
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Filtered model requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestListResponse"
+  /api/v1/requests/{requestId}:
+    get:
+      operationId: getRequest
+      tags: [Observability]
+      summary: Get one model request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Model request detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestResponse"
+        "404":
+          description: Request does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, service, time]
+      properties:
+        status:
+          type: string
+          const: ok
+        service:
+          type: string
+          const: aethergate-api
+        time:
+          type: string
+          format: date-time
+    MetricTone:
+      type: string
+      enum: [accent, success, warning, danger]
+    OverviewMetric:
+      type: object
+      required: [label, value, change, hint, tone]
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+        change:
+          type: number
+          format: double
+        hint:
+          type: string
+        tone:
+          $ref: "#/components/schemas/MetricTone"
+    OverviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [metrics, source]
+          properties:
+            metrics:
+              type: array
+              items:
+                $ref: "#/components/schemas/OverviewMetric"
+            source:
+              type: string
+    RequestStatus:
+      type: string
+      enum: [success, error, rate_limited]
+    LLMRequest:
+      type: object
+      required:
+        - id
+        - timestamp
+        - model
+        - provider
+        - project
+        - user
+        - status
+        - latencyMs
+        - inputTokens
+        - outputTokens
+        - costUsd
+        - cached
+        - prompt
+        - response
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        model:
+          type: string
+        provider:
+          type: string
+        project:
+          type: string
+        user:
+          type: string
+        status:
+          $ref: "#/components/schemas/RequestStatus"
+        latencyMs:
+          type: integer
+          minimum: 0
+        inputTokens:
+          type: integer
+          minimum: 0
+        outputTokens:
+          type: integer
+          minimum: 0
+        costUsd:
+          type: number
+          format: double
+          minimum: 0
+        cached:
+          type: boolean
+        prompt:
+          type: string
+        response:
+          type: string
+    RequestResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/LLMRequest"
+    RequestListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLMRequest"
+        meta:
+          type: object
+          required: [count, total, source]
+          properties:
+            count:
+              type: integer
+              minimum: 0
+            total:
+              type: integer
+              minimum: 0
+            source:
+              type: string
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string

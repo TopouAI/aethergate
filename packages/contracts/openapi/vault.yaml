@@ -1,0 +1,190 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Enterprise Vault API
+  version: 0.1.0
+  description: Metadata-only management for versioned envelope-encrypted provider and integration credentials plus immutable access evidence. Plaintext resolution is intentionally unavailable over public HTTP.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Vault
+paths:
+  /api/v1/vault/secrets:
+    get:
+      operationId: listVaultSecrets
+      tags: [Vault]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/VaultSecretKind" } }
+        - { name: scopeType, in: query, schema: { $ref: "#/components/schemas/VaultScopeType" } }
+        - { name: status, in: query, schema: { type: string, enum: [all, active, disabled] } }
+        - { name: rotation, in: query, schema: { type: string, enum: [all, overdue, due, healthy] } }
+      responses:
+        "200": { description: Masked secret metadata only., content: { application/json: { schema: { $ref: "#/components/schemas/VaultSecretListResponse" } } } }
+    post:
+      operationId: createVaultSecret
+      tags: [Vault]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateVaultSecretRequest" } } } }
+      responses:
+        "201": { description: Secret envelope-encrypted and metadata returned without plaintext or ciphertext., content: { application/json: { schema: { $ref: "#/components/schemas/VaultSecretResponse" } } } }
+        "409": { description: A live secret with the same tenant-scoped name exists., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "422": { description: Definition, secret length, expiry, IP, or server-side key configuration validation failed., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/vault/secrets/{secretID}:
+    get:
+      operationId: getVaultSecret
+      tags: [Vault]
+      parameters: [{ $ref: "#/components/parameters/SecretID" }, { $ref: "#/components/parameters/OrganizationID" }]
+      responses:
+        "200": { description: Masked secret metadata and rotation state., content: { application/json: { schema: { $ref: "#/components/schemas/VaultSecretResponse" } } } }
+        "404": { description: Secret metadata does not exist in this tenant., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/vault/secrets/{secretID}/rotate:
+    post:
+      operationId: rotateVaultSecret
+      tags: [Vault]
+      parameters: [{ $ref: "#/components/parameters/SecretID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RotateVaultSecretRequest" } } } }
+      responses:
+        "200": { description: New encrypted version activated and prior version superseded., content: { application/json: { schema: { $ref: "#/components/schemas/VaultSecretResponse" } } } }
+        "409": { description: Concurrent rotation changed the current version., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "422": { description: Secret material, reason, IP, state, or key configuration validation failed., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/vault/secrets/{secretID}/disable:
+    post:
+      operationId: disableVaultSecret
+      tags: [Vault]
+      parameters: [{ $ref: "#/components/parameters/SecretID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DisableVaultSecretRequest" } } } }
+      responses:
+        "200": { description: Secret disabled; subsequent internal resolution is denied and recorded., content: { application/json: { schema: { $ref: "#/components/schemas/VaultSecretResponse" } } } }
+        "422": { description: Reason, IP, or current state validation failed., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/vault/access-events:
+    get:
+      operationId: listVaultAccessEvents
+      tags: [Vault]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - { name: secretId, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string, enum: [all, success, denied, failure] } }
+        - { name: actor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Append-only management and internal-resolution evidence without secret material., content: { application/json: { schema: { $ref: "#/components/schemas/VaultAccessListResponse" } } } }
+components:
+  parameters:
+    OrganizationID: { name: organizationId, in: query, schema: { type: string, default: org_topoai } }
+    SecretID: { name: secretID, in: path, required: true, schema: { type: string } }
+  schemas:
+    VaultSecretKind: { type: string, enum: [provider_api_key, webhook_signing_secret, integration_token, smtp_password, object_storage_key, database_credential, generic] }
+    VaultScopeType: { type: string, enum: [provider, webhook, notification, reporting, gateway, integration, organization] }
+    VaultSecret:
+      type: object
+      description: Public metadata. Ciphertext, nonces, encrypted data keys, and plaintext are never serialized.
+      required: [id, organizationId, name, kind, scopeType, scopeId, status, reference, maskedValue, fingerprint, currentVersion, rotationIntervalDays, lastRotatedAt, rotationDueAt, expiresAt, createdBy, createdAt, updatedAt, disabledAt, disabledBy, disabledReason]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/VaultSecretKind" }
+        scopeType: { $ref: "#/components/schemas/VaultScopeType" }
+        scopeId: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        reference: { type: string, pattern: "^vault://" }
+        maskedValue: { type: string, description: Non-reversible display mask with at most short prefix/suffix hints. }
+        fingerprint: { type: string, pattern: "^[0-9a-f]{16}$" }
+        currentVersion: { type: integer, minimum: 1 }
+        rotationIntervalDays: { type: integer, minimum: 1, maximum: 365 }
+        lastRotatedAt: { type: string, format: date-time }
+        rotationDueAt: { type: string, format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        disabledAt: { type: [string, "null"], format: date-time }
+        disabledBy: { type: string }
+        disabledReason: { type: string }
+    CreateVaultSecretRequest:
+      type: object
+      required: [organizationId, name, kind, scopeType, scopeId, secretValue, rotationIntervalDays, createdBy]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        kind: { $ref: "#/components/schemas/VaultSecretKind" }
+        scopeType: { $ref: "#/components/schemas/VaultScopeType" }
+        scopeId: { type: string, minLength: 1 }
+        secretValue: { type: string, minLength: 8, maxLength: 65536, writeOnly: true }
+        rotationIntervalDays: { type: integer, minimum: 0, maximum: 365, description: Zero selects the safe 90-day default. }
+        expiresAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        requestId: { type: string }
+        sourceIp: { type: string }
+    RotateVaultSecretRequest:
+      type: object
+      required: [organizationId, secretValue, reason, rotatedBy]
+      properties:
+        organizationId: { type: string }
+        secretValue: { type: string, minLength: 8, maxLength: 65536, writeOnly: true }
+        reason: { type: string, minLength: 1 }
+        rotatedBy: { type: string }
+        requestId: { type: string }
+        sourceIp: { type: string }
+    DisableVaultSecretRequest:
+      type: object
+      required: [organizationId, reason, disabledBy]
+      properties:
+        organizationId: { type: string }
+        reason: { type: string, minLength: 1 }
+        disabledBy: { type: string }
+        requestId: { type: string }
+        sourceIp: { type: string }
+    VaultAccessEvent:
+      type: object
+      required: [id, organizationId, secretId, secretName, secretVersion, actor, workload, purpose, outcome, requestId, sourceIp, errorCode, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        secretId: { type: string }
+        secretName: { type: string }
+        secretVersion: { type: integer, minimum: 1 }
+        actor: { type: string }
+        workload: { type: string }
+        purpose: { type: string }
+        outcome: { type: string, enum: [success, denied, failure] }
+        requestId: { type: string }
+        sourceIp: { type: string }
+        errorCode: { type: string }
+        createdAt: { type: string, format: date-time }
+    ResponseMeta:
+      type: object
+      required: [source]
+      additionalProperties: true
+      properties:
+        source: { type: string }
+        plaintextReturned: { type: boolean, const: false }
+        encryption: { type: string }
+        resolutionBoundary: { type: string, const: internal-workers-only }
+    VaultSecretResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/VaultSecret" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    VaultSecretListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/VaultSecret" } }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    VaultAccessListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/VaultAccessEvent" } }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

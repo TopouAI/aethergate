@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Rate Limits API
+  version: 0.1.0
+  description: Hierarchical rate-limit rule lifecycle and deterministic dry-run evaluation. Runtime distributed counters are a separate integration gate.
+servers:
+  - url: http://localhost:8080
+tags: [{ name: Rate limits }]
+paths:
+  /api/v1/rate-limits:
+    get:
+      operationId: listRateLimits
+      tags: [Rate limits]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [all, draft, enforced, disabled] } }
+        - { name: scopeType, in: query, schema: { type: string, enum: [all, organization, workspace, project, api_key, user] } }
+      responses:
+        "200":
+          description: Filtered hierarchical rate-limit rules.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitListResponse" } } }
+    post:
+      operationId: createRateLimit
+      tags: [Rate limits]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateRateLimitRequest" } } }
+      responses:
+        "201":
+          description: Rate-limit rule created in draft state.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitResponse" } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/rate-limits/{ruleId}/enforce:
+    post:
+      operationId: enforceRateLimit
+      tags: [Rate limits]
+      parameters: [{ $ref: "#/components/parameters/RuleId" }, { $ref: "#/components/parameters/OrganizationId" }]
+      responses:
+        "200": { description: Enforced rule., content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/rate-limits/{ruleId}/disable:
+    post:
+      operationId: disableRateLimit
+      tags: [Rate limits]
+      parameters: [{ $ref: "#/components/parameters/RuleId" }, { $ref: "#/components/parameters/OrganizationId" }]
+      responses:
+        "200": { description: Disabled rule., content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitResponse" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/rate-limits/evaluate:
+    post:
+      operationId: evaluateRateLimit
+      tags: [Rate limits]
+      summary: Dry-run inherited rules without mutating counters
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitEvaluationRequest" } } }
+      responses:
+        "200":
+          description: Deterministic dry-run decision and every matched rule.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RateLimitDecisionResponse" } } }
+        "422": { $ref: "#/components/responses/ValidationError" }
+components:
+  parameters:
+    OrganizationId: { name: organizationId, in: query, schema: { type: string, default: org_topoai } }
+    RuleId: { name: ruleId, in: path, required: true, schema: { type: string } }
+  responses:
+    NotFound: { description: Rule not found., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+    Conflict: { description: Rule name already exists., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+    ValidationError: { description: Rule or evaluation input is invalid., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  schemas:
+    RateLimitRule:
+      type: object
+      required: [id, organizationId, name, status, scopeType, scopeId, metric, window, limit, burst, action, priority, matchedRequests, limitedRequests, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [draft, enforced, disabled] }
+        scopeType: { type: string, enum: [organization, workspace, project, api_key, user] }
+        scopeId: { type: string }
+        metric: { type: string, enum: [requests, tokens, concurrency] }
+        window: { type: string, enum: [second, minute, hour, day] }
+        limit: { type: integer, minimum: 1 }
+        burst: { type: integer, minimum: 0 }
+        action: { type: string, enum: [reject, throttle, observe] }
+        priority: { type: integer, minimum: 0, maximum: 1000 }
+        matchedRequests: { type: integer, minimum: 0 }
+        limitedRequests: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateRateLimitRequest:
+      type: object
+      required: [organizationId, name, scopeType, scopeId, metric, window, limit, burst, action, priority]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        scopeType: { type: string, enum: [organization, workspace, project, api_key, user] }
+        scopeId: { type: string, minLength: 1 }
+        metric: { type: string, enum: [requests, tokens, concurrency] }
+        window: { type: string, enum: [second, minute, hour, day] }
+        limit: { type: integer, minimum: 1 }
+        burst: { type: integer, minimum: 0 }
+        action: { type: string, enum: [reject, throttle, observe] }
+        priority: { type: integer, minimum: 0, maximum: 1000 }
+    RateLimitEvaluationRequest:
+      type: object
+      required: [organizationId, metric, currentUsage, requestedUnits]
+      properties:
+        organizationId: { type: string }
+        workspaceId: { type: string }
+        projectId: { type: string }
+        apiKeyId: { type: string }
+        userId: { type: string }
+        metric: { type: string, enum: [requests, tokens, concurrency] }
+        currentUsage: { type: integer, minimum: 0 }
+        requestedUnits: { type: integer, minimum: 1 }
+    RateLimitMatch:
+      type: object
+      required: [ruleId, ruleName, scopeType, scopeId, window, action, limit, burst, currentUsage, projectedUsage, remaining, exceeded, retryAfterSeconds]
+      properties:
+        ruleId: { type: string }
+        ruleName: { type: string }
+        scopeType: { type: string }
+        scopeId: { type: string }
+        window: { type: string }
+        action: { type: string }
+        limit: { type: integer }
+        burst: { type: integer }
+        currentUsage: { type: integer }
+        projectedUsage: { type: integer }
+        remaining: { type: integer }
+        exceeded: { type: boolean }
+        retryAfterSeconds: { type: integer }
+    RateLimitDecision:
+      type: object
+      required: [allowed, mode, reason, matches]
+      properties:
+        allowed: { type: boolean }
+        mode: { type: string, const: dry-run }
+        reason: { type: string }
+        matches: { type: array, items: { $ref: "#/components/schemas/RateLimitMatch" } }
+    RateLimitResponse: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/RateLimitRule" }, meta: { type: object, additionalProperties: { type: string } } } }
+    RateLimitListResponse: { type: object, required: [data, meta], properties: { data: { type: array, items: { $ref: "#/components/schemas/RateLimitRule" } }, meta: { type: object, required: [count, source], properties: { count: { type: integer }, source: { type: string } } } } }
+    RateLimitDecisionResponse: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/RateLimitDecision" }, meta: { type: object, additionalProperties: { type: string } } } }
+    ErrorResponse: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } } }

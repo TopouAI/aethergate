@@ -1,0 +1,53 @@
+"use client";
+
+import { Button, Card, Table } from "@heroui/react";
+import { ChartNoAxesCombined, ChevronRight, CircleDollarSign, FolderKanban, Gauge, Plus, Workflow } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import { Dialog, Field, inputClass, MetricGrid, PageHeader, SearchBar, selectClass, StateBadge, type APIState } from "@/components/foundation/resource-ui";
+import { createProject, listProjects, listWorkspaces } from "@/lib/control-plane";
+import { foundationOrganizationId, seedProjects, seedWorkspaces } from "@/lib/foundation-data";
+import type { Project, Workspace } from "@/types/foundation";
+
+function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+
+export function ProjectsPage() {
+  const [items, setItems] = useState(seedProjects);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(seedWorkspaces);
+  const [query, setQuery] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(seedProjects[0]?.id ?? "");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [workspaceId, setWorkspaceId] = useState(seedWorkspaces[0]?.id ?? "");
+  const [owner, setOwner] = useState("holden@topoai.dev");
+  const [budget, setBudget] = useState("2500");
+  const [apiState, setAPIState] = useState<APIState>("connecting");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.all([listProjects({ organizationId: foundationOrganizationId }, controller.signal), listWorkspaces(foundationOrganizationId, controller.signal)]).then(([projectResponse, workspaceResponse]) => { setItems(projectResponse.data); setWorkspaces(workspaceResponse.data); setWorkspaceId((current) => workspaceResponse.data.some((item) => item.id === current) ? current : workspaceResponse.data[0]?.id ?? ""); setSelectedId((current) => projectResponse.data.some((item) => item.id === current) ? current : projectResponse.data[0]?.id ?? ""); setAPIState("connected"); }).catch((error: unknown) => { if (!(error instanceof DOMException && error.name === "AbortError")) setAPIState("fallback"); });
+    return () => controller.abort();
+  }, []);
+
+  const filtered = useMemo(() => { const needle = query.trim().toLowerCase(); return items.filter((item) => (workspaceFilter === "all" || item.workspaceId === workspaceFilter) && (!needle || [item.name, item.slug, item.owner, item.workspace].some((value) => value.toLowerCase().includes(needle)))); }, [items, query, workspaceFilter]);
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+  const totalSpend = items.reduce((sum, item) => sum + item.monthlyCostUsd, 0);
+  const totalBudget = items.reduce((sum, item) => sum + item.budgetUsd, 0);
+  const totalRequests = items.reduce((sum, item) => sum + item.requests, 0);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const trimmed = name.trim(); if (!trimmed || !workspaceId) return; setAPIState("saving");
+    try { const { data } = await createProject({ organizationId: foundationOrganizationId, workspaceId, name: trimmed, slug: slugify(trimmed), owner, budgetUsd: Number(budget) || 0 }); setItems((current) => [data, ...current]); setSelectedId(data.id); setAPIState("connected"); }
+    catch { const workspace = workspaces.find((item) => item.id === workspaceId); const fallback: Project = { id: `project_${crypto.randomUUID().slice(0, 8)}`, organizationId: foundationOrganizationId, workspaceId, workspace: workspace?.name ?? "Workspace", name: trimmed, slug: slugify(trimmed), status: "active", owner, budgetUsd: Number(budget) || 0, monthlyCostUsd: 0, requests: 0, createdAt: new Date().toISOString() }; setItems((current) => [fallback, ...current]); setSelectedId(fallback.id); setAPIState("fallback"); }
+    setName(""); setDialogOpen(false);
+  }
+
+  return <div className="mx-auto flex w-full max-w-[1760px] flex-col gap-5">
+    <PageHeader eyebrow="Enterprise control plane" title="Projects" description="Attribute gateway traffic, ownership, spend, keys, experiments, and policy decisions to enterprise initiatives." icon={ChartNoAxesCombined} apiState={apiState} action={<Button onPress={() => setDialogOpen(true)} isDisabled={!workspaces.length} className="h-9 gap-2 bg-blue-500 px-3 text-xs text-white"><Plus size={14} /> Create project</Button>} />
+    <MetricGrid items={[{ label: "Projects", value: items.length.toString(), hint: `${workspaces.length} workspaces`, icon: FolderKanban }, { label: "Monthly spend", value: `$${totalSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, hint: `of $${totalBudget.toLocaleString()} budget`, icon: CircleDollarSign }, { label: "Requests", value: totalRequests.toLocaleString(), hint: "Attributed traffic", icon: Gauge }, { label: "Owners", value: new Set(items.map((item) => item.owner)).size.toString(), hint: "Accountable teams", icon: Workflow }]} />
+    <SearchBar value={query} onChange={setQuery} placeholder="Search project, owner, workspace, or slug..." trailing={<select value={workspaceFilter} onChange={(event) => setWorkspaceFilter(event.target.value)} className={selectClass}><option value="all">All workspaces</option>{workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>} />
+    <section className={`grid min-w-0 gap-4 ${selected ? "2xl:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"}`}><Card className="glass-panel min-w-0 overflow-hidden px-0 py-0"><Card.Header className="border-b border-white/[0.055] p-4"><Card.Title className="text-sm font-medium text-slate-100">Project registry</Card.Title><Card.Description className="mt-1 text-xs text-slate-600">{filtered.length} visible projects</Card.Description></Card.Header><Card.Content className="p-0"><Table className="rounded-none border-0 bg-transparent"><Table.ScrollContainer><Table.Content aria-label="Project registry" className="min-w-[940px]"><Table.Header>{[["project", "Project"], ["workspace", "Workspace"], ["status", "Status"], ["owner", "Owner"], ["budget", "Spend / Budget"], ["requests", "Requests"], ["open", ""]].map(([id, label]) => <Table.Column key={id} id={id} className={`bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase ${["budget", "requests"].includes(id) ? "text-right" : ""}`}>{label}</Table.Column>)}</Table.Header><Table.Body>{filtered.map((item) => <Table.Row key={item.id} id={item.id} onClick={() => setSelectedId(item.id)} className={`cursor-pointer border-t border-white/[0.045] transition hover:bg-white/[0.03] ${selectedId === item.id ? "bg-blue-400/[0.055]" : ""}`}><Table.Cell><p className="text-xs font-medium text-slate-200">{item.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-600">{item.slug}</p></Table.Cell><Table.Cell className="text-xs text-slate-400">{item.workspace}</Table.Cell><Table.Cell><StateBadge value={item.status} /></Table.Cell><Table.Cell className="max-w-48 truncate text-[11px] text-slate-400">{item.owner}</Table.Cell><Table.Cell className="text-right"><p className="font-mono text-xs text-slate-300">${item.monthlyCostUsd.toLocaleString()}</p><p className="text-[10px] text-slate-600">of ${item.budgetUsd.toLocaleString()}</p></Table.Cell><Table.Cell className="text-right font-mono text-[11px] text-slate-400">{item.requests.toLocaleString()}</Table.Cell><Table.Cell><ChevronRight className="ml-auto text-slate-700" size={14} /></Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></Card.Content></Card>{selected && <aside className="glass-panel sticky top-[76px] max-h-[calc(100vh-100px)] overflow-y-auto"><div className="border-b border-white/[0.06] p-5"><div className="flex items-center justify-between"><span className="rounded-xl bg-blue-400/10 p-2 text-blue-300"><FolderKanban size={17} /></span><StateBadge value={selected.status} /></div><h2 className="mt-4 text-base font-semibold text-white">{selected.name}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected.id}</p></div><div className="space-y-5 p-5"><div className="grid grid-cols-2 gap-2">{[["Spend", `$${selected.monthlyCostUsd.toLocaleString()}`], ["Requests", selected.requests.toLocaleString()]].map(([label, value]) => <div key={label} className="rounded-xl border border-white/[0.055] bg-white/[0.018] p-3"><p className="text-[9px] tracking-wider text-slate-600 uppercase">{label}</p><p className="mt-1.5 text-sm font-medium text-slate-200">{value}</p></div>)}</div><dl className="space-y-3 text-[11px]">{[["Workspace", selected.workspace], ["Owner", selected.owner], ["Budget", `$${selected.budgetUsd.toLocaleString()}`], ["Created", new Date(selected.createdAt).toLocaleDateString("zh-CN")]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-slate-600">{label}</dt><dd className="truncate text-slate-300">{value}</dd></div>)}</dl><div className="rounded-xl border border-white/[0.055] bg-black/20 p-3"><div className="flex justify-between text-[10px]"><span className="text-slate-500">Budget utilization</span><span className="text-slate-300">{selected.budgetUsd ? `${Math.round(selected.monthlyCostUsd / selected.budgetUsd * 100)}%` : "Not set"}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/5"><span className="block h-full rounded-full bg-blue-400" style={{ width: `${selected.budgetUsd ? Math.min(100, selected.monthlyCostUsd / selected.budgetUsd * 100) : 0}%` }} /></div></div></div></aside>}</section>
+    {dialogOpen && <Dialog title="Create project" description="Add an accountable AI initiative to a workspace." submitLabel="Create project" canSubmit={Boolean(name.trim() && workspaceId && owner.trim())} onClose={() => setDialogOpen(false)} onSubmit={submit}><Field label="Project name"><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Knowledge Assistant" className={inputClass} /></Field><Field label="Workspace"><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} className={selectClass}>{workspaces.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.environment}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Owner"><input value={owner} onChange={(event) => setOwner(event.target.value)} type="email" className={inputClass} /></Field><Field label="Monthly budget (USD)"><input value={budget} onChange={(event) => setBudget(event.target.value)} type="number" min="0" className={inputClass} /></Field></div></Dialog>}
+  </div>;
+}

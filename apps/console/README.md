@@ -1,6 +1,6 @@
 # AetherGate Console
 
-The enterprise management UI for organizations, workspaces, projects, members, API keys, models, budgets, usage, and audit workflows.
+The HeroUI v3 enterprise management UI for organizations, workspaces, projects, members, API keys, models, providers, routing, rate limits, budgets, alerts, webhooks, scheduled reports, notification inbox/routing/escalation, Enterprise Vault, usage, audit workflows, and server-side integration diagnostics.
 
 ## Frontend baseline
 
@@ -40,7 +40,9 @@ app/
 └── workbench/
 ```
 
-This tree describes route ownership; it is not generated source yet.
+This tree describes route ownership. Purpose-built application routes include `/vault`, whose HeroUI workspace provides masked metadata, rotation/disable workflows and immutable access evidence without any plaintext fallback; `/audit`, whose workspace provides tenant event search, risk/outcome filtering, before/after evidence, SHA-256 chain verification, retention/legal-hold policy, and asynchronous export/retry history; and `/developer`, which shows credential-safe LiteLLM configuration, liveness/readiness probe evidence, and reviewed repository/runtime stack placement without exposing the master key.
+
+The Console never mutates audit history and never generates export objects in the browser. Those guarantees belong to the Go API, PostgreSQL constraints/triggers, and isolated worker boundaries.
 
 ## Interaction and table strategy
 

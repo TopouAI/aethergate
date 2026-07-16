@@ -1,0 +1,188 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Routing Policy API
+  version: 0.1.0
+  description: Authoring and health-gated lifecycle contract for control-plane routing policies. Runtime LiteLLM reconciliation is not part of this contract yet.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Routing
+paths:
+  /api/v1/routing-policies:
+    get:
+      operationId: listRoutingPolicies
+      tags: [Routing]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, draft, active, paused] }
+      responses:
+        "200":
+          description: Filtered routing policies and targets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicyListResponse" }
+    post:
+      operationId: createRoutingPolicy
+      tags: [Routing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRoutingPolicyRequest" }
+      responses:
+        "201":
+          description: Routing policy created in draft state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicyResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/routing-policies/{policyId}/activate:
+    post:
+      operationId: activateRoutingPolicy
+      tags: [Routing]
+      parameters:
+        - $ref: "#/components/parameters/PolicyId"
+        - $ref: "#/components/parameters/OrganizationId"
+      responses:
+        "200":
+          description: Active policy after all enabled providers pass health and credential-readiness checks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicyResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/routing-policies/{policyId}/pause:
+    post:
+      operationId: pauseRoutingPolicy
+      tags: [Routing]
+      parameters:
+        - $ref: "#/components/parameters/PolicyId"
+        - $ref: "#/components/parameters/OrganizationId"
+      responses:
+        "200":
+          description: Paused routing policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicyResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: query
+      schema: { type: string, default: org_topoai }
+    PolicyId:
+      name: policyId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    NotFound:
+      description: Routing policy does not exist in the organization.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: Routing policy slug already exists in the organization.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ValidationError:
+      description: Strategy, target, weight, timeout, retry, health, or credential validation failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+  schemas:
+    RoutingTarget:
+      type: object
+      required: [id, providerId, providerName, model, priority, weight, enabled]
+      properties:
+        id: { type: string }
+        providerId: { type: string }
+        providerName: { type: string }
+        model: { type: string }
+        priority: { type: integer, minimum: 1, maximum: 100 }
+        weight: { type: integer, minimum: 0, maximum: 100 }
+        enabled: { type: boolean }
+    RoutingPolicy:
+      type: object
+      required: [id, organizationId, name, slug, status, strategy, modelPattern, maxRetries, requestTimeoutMs, targets, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [draft, active, paused] }
+        strategy: { type: string, enum: [weighted, priority, latency] }
+        modelPattern: { type: string }
+        maxRetries: { type: integer, minimum: 0, maximum: 5 }
+        requestTimeoutMs: { type: integer, minimum: 1000, maximum: 300000 }
+        targets:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RoutingTarget" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateRoutingTargetRequest:
+      type: object
+      required: [providerId, model, priority, weight, enabled]
+      properties:
+        providerId: { type: string }
+        model: { type: string, minLength: 1 }
+        priority: { type: integer, minimum: 1, maximum: 100 }
+        weight: { type: integer, minimum: 0, maximum: 100 }
+        enabled: { type: boolean }
+    CreateRoutingPolicyRequest:
+      type: object
+      required: [organizationId, name, strategy, modelPattern, maxRetries, requestTimeoutMs, targets]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        slug: { type: string }
+        strategy: { type: string, enum: [weighted, priority, latency] }
+        modelPattern: { type: string, minLength: 1 }
+        maxRetries: { type: integer, minimum: 0, maximum: 5 }
+        requestTimeoutMs: { type: integer, minimum: 1000, maximum: 300000 }
+        targets:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/CreateRoutingTargetRequest" }
+    RoutingPolicyResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/RoutingPolicy" }
+        meta:
+          type: object
+          required: [source]
+          properties:
+            source: { type: string }
+    RoutingPolicyListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/RoutingPolicy" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

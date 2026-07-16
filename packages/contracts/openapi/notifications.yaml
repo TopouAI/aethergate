@@ -1,0 +1,329 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Notifications API
+  version: 0.1.0
+  description: Recipient-scoped inbox state, personal channel routing, quiet hours and digests, acknowledgement escalation policies, and isolated-worker delivery evidence.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Notifications
+paths:
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      tags: [Notifications]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - $ref: "#/components/parameters/RecipientID"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [all, unread, read, archived] } }
+        - { name: category, in: query, schema: { type: string, enum: [all, alert, budget, provider, report, access, security, platform] } }
+        - { name: severity, in: query, schema: { type: string, enum: [all, info, warning, critical] } }
+      responses:
+        "200": { description: Recipient-scoped inbox., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationListResponse" } } } }
+    post:
+      operationId: createNotification
+      tags: [Notifications]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateNotificationRequest" } } } }
+      responses:
+        "201": { description: Inbox item created and eligible external deliveries queued or deferred., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationResponse" } } } }
+        "422": { description: "Category, severity, content, or action validation failed.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organizationId, recipientId]
+              properties:
+                organizationId: { type: string }
+                recipientId: { type: string }
+      responses:
+        "200":
+          description: All unread inbox items for the recipient were marked read.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties: { updated: { type: integer, minimum: 0 } }
+  /api/v1/notifications/{notificationID}/read:
+    post:
+      operationId: markNotificationRead
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/NotificationID" }, { $ref: "#/components/parameters/OrganizationID" }, { $ref: "#/components/parameters/RecipientID" }]
+      responses:
+        "200": { description: Inbox item marked read., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationResponse" } } } }
+        "404": { description: Inbox item not found for this recipient., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/notifications/{notificationID}/unread:
+    post:
+      operationId: markNotificationUnread
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/NotificationID" }, { $ref: "#/components/parameters/OrganizationID" }, { $ref: "#/components/parameters/RecipientID" }]
+      responses:
+        "200": { description: Inbox item marked unread., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationResponse" } } } }
+  /api/v1/notifications/{notificationID}/archive:
+    post:
+      operationId: archiveNotification
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/NotificationID" }, { $ref: "#/components/parameters/OrganizationID" }, { $ref: "#/components/parameters/RecipientID" }]
+      responses:
+        "200": { description: Inbox item archived and treated as read., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationResponse" } } } }
+  /api/v1/notification-preferences:
+    get:
+      operationId: getNotificationPreference
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/OrganizationID" }, { $ref: "#/components/parameters/RecipientID" }]
+      responses:
+        "200": { description: Personal notification routing preference or a safe in-app default., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferenceResponse" } } } }
+    put:
+      operationId: upsertNotificationPreference
+      tags: [Notifications]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferenceInput" } } } }
+      responses:
+        "200": { description: Personal routing preference saved., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferenceResponse" } } } }
+        "422": { description: "Destination, category route, timezone, quiet hours, digest, or severity validation failed.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/notification-escalation-policies:
+    get:
+      operationId: listNotificationEscalationPolicies
+      tags: [Notifications]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [all, active, paused] } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Acknowledgement-aware escalation policies., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPolicyListResponse" } } } }
+    post:
+      operationId: createNotificationEscalationPolicy
+      tags: [Notifications]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPolicyInput" } } } }
+      responses:
+        "201": { description: Escalation policy created., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPolicyResponse" } } } }
+        "409": { description: Active policy name already exists., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "422": { description: Escalation route or timing validation failed., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/notification-escalation-policies/evaluate:
+    post:
+      operationId: evaluateNotificationEscalation
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organizationId, category, severity, unacknowledgedMinutes]
+              properties:
+                organizationId: { type: string }
+                category: { $ref: "#/components/schemas/NotificationCategory" }
+                severity: { $ref: "#/components/schemas/NotificationSeverity" }
+                unacknowledgedMinutes: { type: integer, minimum: 0 }
+      responses:
+        "200": { description: Dry-run policy matches without outbound delivery., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationEvaluationResponse" } } } }
+  /api/v1/notification-escalation-policies/{policyID}/activate:
+    post:
+      operationId: activateNotificationEscalationPolicy
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/PolicyID" }, { $ref: "#/components/parameters/OrganizationID" }]
+      responses:
+        "200": { description: Escalation policy activated., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPolicyResponse" } } } }
+  /api/v1/notification-escalation-policies/{policyID}/pause:
+    post:
+      operationId: pauseNotificationEscalationPolicy
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/PolicyID" }, { $ref: "#/components/parameters/OrganizationID" }]
+      responses:
+        "200": { description: Escalation policy paused., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPolicyResponse" } } } }
+  /api/v1/notification-deliveries:
+    get:
+      operationId: listNotificationDeliveries
+      tags: [Notifications]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - $ref: "#/components/parameters/RecipientID"
+        - { name: notificationId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [all, queued, deferred, sending, delivered, failed, suppressed] } }
+        - { name: channel, in: query, schema: { type: string, enum: [all, email, slack, teams, webhook] } }
+      responses:
+        "200": { description: External delivery queue and outcome evidence., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationDeliveryListResponse" } } } }
+  /api/v1/notification-deliveries/{deliveryID}/retry:
+    post:
+      operationId: retryNotificationDelivery
+      tags: [Notifications]
+      parameters: [{ $ref: "#/components/parameters/DeliveryID" }, { $ref: "#/components/parameters/OrganizationID" }]
+      responses:
+        "202": { description: Failed delivery accepted by the isolated Notifications Worker queue., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationDeliveryResponse" } } } }
+        "422": { description: Only failed delivery evidence can be retried., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+components:
+  parameters:
+    OrganizationID: { name: organizationId, in: query, schema: { type: string, default: org_topoai } }
+    RecipientID: { name: recipientId, in: query, schema: { type: string, default: holden@topoai.dev } }
+    NotificationID: { name: notificationID, in: path, required: true, schema: { type: string } }
+    PolicyID: { name: policyID, in: path, required: true, schema: { type: string } }
+    DeliveryID: { name: deliveryID, in: path, required: true, schema: { type: string } }
+  schemas:
+    NotificationCategory: { type: string, enum: [alert, budget, provider, report, access, security, platform] }
+    NotificationSeverity: { type: string, enum: [info, warning, critical] }
+    NotificationChannel: { type: string, enum: [in_app, email, slack, teams, webhook] }
+    Notification:
+      type: object
+      required: [id, organizationId, recipientId, category, severity, title, body, sourceType, sourceId, actionUrl, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        recipientId: { type: string }
+        category: { $ref: "#/components/schemas/NotificationCategory" }
+        severity: { $ref: "#/components/schemas/NotificationSeverity" }
+        title: { type: string, minLength: 1, maxLength: 180 }
+        body: { type: string, minLength: 1, maxLength: 4000 }
+        sourceType: { type: string }
+        sourceId: { type: string }
+        actionUrl: { type: string, pattern: "^$|^/" }
+        status: { type: string, enum: [unread, read, archived] }
+        readAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateNotificationRequest:
+      type: object
+      required: [organizationId, recipientId, category, severity, title, body]
+      properties:
+        organizationId: { type: string }
+        recipientId: { type: string }
+        category: { $ref: "#/components/schemas/NotificationCategory" }
+        severity: { $ref: "#/components/schemas/NotificationSeverity" }
+        title: { type: string, minLength: 1, maxLength: 180 }
+        body: { type: string, minLength: 1, maxLength: 4000 }
+        sourceType: { type: string }
+        sourceId: { type: string }
+        actionUrl: { type: string, pattern: "^$|^/" }
+    NotificationDestination:
+      type: object
+      required: [channel, target, displayName]
+      properties:
+        channel: { $ref: "#/components/schemas/NotificationChannel" }
+        target: { type: string, minLength: 1 }
+        displayName: { type: string }
+    NotificationPreferenceInput:
+      type: object
+      required: [organizationId, recipientId, destinations, categoryChannels, digestFrequency, minimumSeverity, timezone, quietHoursEnabled, quietStart, quietEnd]
+      properties:
+        organizationId: { type: string }
+        recipientId: { type: string }
+        destinations: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/NotificationDestination" } }
+        categoryChannels:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: "#/components/schemas/NotificationChannel" }
+        digestFrequency: { type: string, enum: [realtime, hourly, daily, weekly] }
+        minimumSeverity: { $ref: "#/components/schemas/NotificationSeverity" }
+        timezone: { type: string, description: IANA timezone such as Asia/Shanghai or UTC. }
+        quietHoursEnabled: { type: boolean }
+        quietStart: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        quietEnd: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+    NotificationEscalationRoute:
+      type: object
+      required: [level, delayMinutes, channel, target, displayName]
+      properties:
+        level: { type: integer, minimum: 1, maximum: 5 }
+        delayMinutes: { type: integer, minimum: 0, maximum: 1440 }
+        channel: { $ref: "#/components/schemas/NotificationChannel" }
+        target: { type: string, minLength: 1 }
+        displayName: { type: string }
+    NotificationPolicyInput:
+      type: object
+      required: [organizationId, name, status, categories, minimumSeverity, acknowledgeWithinMinutes, repeatEveryMinutes, maxEscalations, routes]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        status: { type: string, enum: [active, paused] }
+        categories: { type: array, minItems: 1, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationCategory" } }
+        minimumSeverity: { $ref: "#/components/schemas/NotificationSeverity" }
+        acknowledgeWithinMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        repeatEveryMinutes: { type: integer, minimum: 0, maximum: 1440 }
+        maxEscalations: { type: integer, minimum: 1, maximum: 5 }
+        routes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/NotificationEscalationRoute" } }
+    NotificationEscalationPolicy:
+      allOf:
+        - $ref: "#/components/schemas/NotificationPolicyInput"
+        - type: object
+          required: [id, createdAt, updatedAt]
+          properties:
+            id: { type: string }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    NotificationDelivery:
+      type: object
+      required: [id, organizationId, notificationId, notification, recipientId, channel, target, displayName, status, attempt, availableAt, errorMessage, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        notificationId: { type: string }
+        notification: { type: string }
+        recipientId: { type: string }
+        channel: { type: string, enum: [email, slack, teams, webhook] }
+        target: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [queued, deferred, sending, delivered, failed, suppressed] }
+        attempt: { type: integer, minimum: 1 }
+        availableAt: { type: string, format: date-time }
+        deliveredAt: { type: [string, "null"], format: date-time }
+        errorMessage: { type: string }
+        parentId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    NotificationResponse:
+      type: object
+      properties: { data: { $ref: "#/components/schemas/Notification" }, meta: { type: object, additionalProperties: true } }
+    NotificationListResponse:
+      type: object
+      properties: { data: { type: array, items: { $ref: "#/components/schemas/Notification" } }, meta: { type: object, additionalProperties: true } }
+    NotificationPreferenceResponse:
+      type: object
+      properties:
+        data:
+          allOf:
+            - $ref: "#/components/schemas/NotificationPreferenceInput"
+            - type: object
+              properties: { updatedAt: { type: string, format: date-time } }
+    NotificationPolicyResponse:
+      type: object
+      properties: { data: { $ref: "#/components/schemas/NotificationEscalationPolicy" }, meta: { type: object, additionalProperties: true } }
+    NotificationPolicyListResponse:
+      type: object
+      properties: { data: { type: array, items: { $ref: "#/components/schemas/NotificationEscalationPolicy" } }, meta: { type: object, additionalProperties: true } }
+    NotificationDeliveryResponse:
+      type: object
+      properties: { data: { $ref: "#/components/schemas/NotificationDelivery" }, meta: { type: object, additionalProperties: true } }
+    NotificationDeliveryListResponse:
+      type: object
+      properties: { data: { type: array, items: { $ref: "#/components/schemas/NotificationDelivery" } }, meta: { type: object, additionalProperties: true } }
+    NotificationEvaluationResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            matched: { type: boolean }
+            matches:
+              type: array
+              items:
+                type: object
+                properties:
+                  policyId: { type: string }
+                  policyName: { type: string }
+                  routes: { type: array, items: { $ref: "#/components/schemas/NotificationEscalationRoute" } }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties: { code: { type: string }, message: { type: string } }

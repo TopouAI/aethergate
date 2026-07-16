@@ -1,0 +1,7 @@
+import { foundationOrganizationId } from "@/lib/foundation-data";
+import type { RoutingPolicy } from "@/types/routing";
+
+export const seedRoutingPolicies: RoutingPolicy[] = [
+  { id: "route_balanced_copilot", organizationId: foundationOrganizationId, name: "Copilot balanced pool", slug: "copilot-balanced", status: "active", strategy: "weighted", modelPattern: "copilot/*", maxRetries: 2, requestTimeoutMs: 45000, targets: [{ id: "target_openai", providerId: "provider_openai_primary", providerName: "OpenAI Primary", model: "gpt-5-mini", priority: 1, weight: 60, enabled: true }, { id: "target_anthropic", providerId: "provider_anthropic_primary", providerName: "Anthropic Primary", model: "claude-sonnet-4", priority: 2, weight: 40, enabled: true }], createdAt: "2026-04-01T00:00:00Z", updatedAt: "2026-04-01T00:00:00Z" },
+  { id: "route_research_fallback", organizationId: foundationOrganizationId, name: "Research priority fallback", slug: "research-priority", status: "draft", strategy: "priority", modelPattern: "research/*", maxRetries: 3, requestTimeoutMs: 90000, targets: [{ id: "target_research_anthropic", providerId: "provider_anthropic_primary", providerName: "Anthropic Primary", model: "claude-sonnet-4", priority: 1, weight: 100, enabled: true }, { id: "target_research_deepseek", providerId: "provider_deepseek_apac", providerName: "DeepSeek APAC", model: "deepseek-v3", priority: 2, weight: 0, enabled: true }], createdAt: "2026-04-01T00:00:00Z", updatedAt: "2026-04-01T00:00:00Z" },
+];

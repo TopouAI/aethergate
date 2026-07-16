@@ -1,0 +1,91 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Integration Diagnostics API
+  version: 0.1.0
+  description: Credential-safe server-side diagnostics for the LiteLLM data-plane boundary. No LiteLLM response body, master key, or internal database data is exposed.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Integrations
+paths:
+  /api/v1/integrations/litellm/status:
+    get:
+      operationId: getLiteLLMIntegrationStatus
+      tags: [Integrations]
+      summary: Read sanitized server configuration state
+      responses:
+        "200":
+          description: Configuration metadata without the LiteLLM master-key value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LiteLLMStatusResponse" }
+  /api/v1/integrations/litellm/verify:
+    post:
+      operationId: verifyLiteLLMIntegration
+      tags: [Integrations]
+      summary: Probe LiteLLM liveness and readiness from the Go API network
+      responses:
+        "200":
+          description: Both probes completed; inspect overall and each probe rather than treating transport completion as readiness.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LiteLLMStatusResponse" }
+        "422":
+          description: LITELLM_BASE_URL is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Verification could not be completed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+components:
+  schemas:
+    IntegrationProbe:
+      type: object
+      required: [path, healthy, statusCode, latencyMs, errorCode]
+      properties:
+        path: { type: string, enum: [/health/liveliness, /health/readiness] }
+        healthy: { type: boolean }
+        statusCode: { type: integer, minimum: 0, maximum: 599 }
+        latencyMs: { type: integer, minimum: 0 }
+        errorCode:
+          type: string
+          enum: ["", request_invalid, timeout, unreachable, redirect_rejected, authentication_failed, unexpected_status]
+    LiteLLMIntegrationStatus:
+      type: object
+      description: Sanitized diagnostic state. The master-key value is intentionally not part of this schema.
+      required: [configured, baseUrl, masterKeyConfigured, overall, liveness, readiness, checkedAt]
+      properties:
+        configured: { type: boolean }
+        baseUrl: { type: string, description: Server-side LiteLLM base URL without credentials, query, or fragment. }
+        masterKeyConfigured: { type: boolean, description: Presence indicator only; never the key value. }
+        overall: { type: string, enum: [not_configured, configured, ready, not_ready, unavailable] }
+        liveness: { oneOf: [{ $ref: "#/components/schemas/IntegrationProbe" }, { type: "null" }] }
+        readiness: { oneOf: [{ $ref: "#/components/schemas/IntegrationProbe" }, { type: "null" }] }
+        checkedAt: { type: [string, "null"], format: date-time }
+    ResponseMeta:
+      type: object
+      required: [source, credentialExposure]
+      additionalProperties: true
+      properties:
+        source: { type: string, enum: [server-configuration, live-probe] }
+        credentialExposure: { type: string, const: none }
+        databaseAccess: { type: string, const: none }
+    LiteLLMStatusResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/LiteLLMIntegrationStatus" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

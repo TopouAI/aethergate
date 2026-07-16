@@ -1,0 +1,344 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Reports API
+  version: 0.1.0
+  description: Timezone-aware report schedules, output formats, recipients, worker-queued generation, delivery evidence, and retry lineage.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Reports
+paths:
+  /api/v1/reports:
+    get:
+      operationId: listReports
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, active, paused] }
+        - name: template
+          in: query
+          schema: { type: string, enum: [all, executive_summary, usage_cost, reliability, adoption, raw_export] }
+      responses:
+        "200":
+          description: Filtered report schedules.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportListResponse" }
+    post:
+      operationId: createReport
+      tags: [Reports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReportRequest" }
+      responses:
+        "201":
+          description: Report schedule created with a calculated next run when active.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "404":
+          description: Organization not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Report name already exists in the organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Schedule, timezone, format, recipient, or filter validation failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/reports/{reportID}/activate:
+    post:
+      operationId: activateReport
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/ReportID"
+        - $ref: "#/components/parameters/OrganizationID"
+      responses:
+        "200":
+          description: Schedule activated with a timezone-safe next run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/reports/{reportID}/pause:
+    post:
+      operationId: pauseReport
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/ReportID"
+        - $ref: "#/components/parameters/OrganizationID"
+      responses:
+        "200":
+          description: Schedule paused and next run cleared.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/reports/{reportID}/run:
+    post:
+      operationId: queueReportRun
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/ReportID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueueReportRunRequest" }
+      responses:
+        "202":
+          description: Manual run accepted by the isolated Reports Worker queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportRunResponse" }
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Custom reporting period is invalid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/report-runs:
+    get:
+      operationId: listReportRuns
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationID"
+        - name: reportId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, queued, running, succeeded, failed, cancelled] }
+        - name: trigger
+          in: query
+          schema: { type: string, enum: [all, schedule, manual, retry] }
+      responses:
+        "200":
+          description: Report generation and delivery history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportRunListResponse" }
+  /api/v1/report-runs/{runID}/retry:
+    post:
+      operationId: retryReportRun
+      tags: [Reports]
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - $ref: "#/components/parameters/OrganizationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestedBy: { type: string }
+      responses:
+        "202":
+          description: Failed run accepted for retry with its original reporting period.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportRunResponse" }
+        "404":
+          description: Report run not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Only failed report runs can be retried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+components:
+  parameters:
+    OrganizationID:
+      name: organizationId
+      in: query
+      schema: { type: string, default: org_topoai }
+    ReportID:
+      name: reportID
+      in: path
+      required: true
+      schema: { type: string }
+    RunID:
+      name: runID
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    ReportRecipient:
+      type: object
+      required: [channel, target]
+      properties:
+        channel: { type: string, enum: [email, slack] }
+        target: { type: string, minLength: 1 }
+        displayName: { type: string }
+    ReportSchedule:
+      type: object
+      required: [id, organizationId, name, template, status, frequency, dayOfWeek, dayOfMonth, localTime, timezone, formats, recipients, filters, includeRawData, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        template: { type: string, enum: [executive_summary, usage_cost, reliability, adoption, raw_export] }
+        status: { type: string, enum: [active, paused] }
+        frequency: { type: string, enum: [daily, weekly, monthly] }
+        dayOfWeek: { type: string, enum: ["", sunday, monday, tuesday, wednesday, thursday, friday, saturday] }
+        dayOfMonth: { type: integer, minimum: 0, maximum: 28 }
+        localTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        timezone: { type: string, description: IANA timezone such as Asia/Shanghai or UTC. }
+        formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [csv, xlsx, pdf] }
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ReportRecipient" }
+        filters:
+          type: object
+          additionalProperties: { type: string }
+        includeRawData: { type: boolean }
+        lastRunAt: { type: [string, "null"], format: date-time }
+        nextRunAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateReportRequest:
+      type: object
+      required: [organizationId, name, template, status, frequency, dayOfWeek, dayOfMonth, localTime, timezone, formats, recipients, filters, includeRawData]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        template: { type: string, enum: [executive_summary, usage_cost, reliability, adoption, raw_export] }
+        status: { type: string, enum: [active, paused] }
+        frequency: { type: string, enum: [daily, weekly, monthly] }
+        dayOfWeek: { type: string }
+        dayOfMonth: { type: integer, minimum: 0, maximum: 28 }
+        localTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        timezone: { type: string }
+        formats:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [csv, xlsx, pdf] }
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ReportRecipient" }
+        filters:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string }
+        includeRawData: { type: boolean }
+    QueueReportRunRequest:
+      type: object
+      required: [organizationId]
+      properties:
+        organizationId: { type: string }
+        requestedBy: { type: string }
+        periodStart: { type: [string, "null"], format: date-time }
+        periodEnd: { type: [string, "null"], format: date-time }
+    ReportRun:
+      type: object
+      required: [id, organizationId, reportId, reportName, status, trigger, attempt, requestedBy, scheduledFor, periodStart, periodEnd, artifactCount, rowCount, sizeBytes, deliveryStatus, errorMessage, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        reportId: { type: string }
+        reportName: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        trigger: { type: string, enum: [schedule, manual, retry] }
+        attempt: { type: integer, minimum: 1 }
+        requestedBy: { type: string }
+        scheduledFor: { type: string, format: date-time }
+        periodStart: { type: string, format: date-time }
+        periodEnd: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        artifactCount: { type: integer, minimum: 0 }
+        rowCount: { type: integer, minimum: 0 }
+        sizeBytes: { type: integer, minimum: 0 }
+        deliveryStatus: { type: string, enum: [pending, delivered, partial, failed] }
+        errorMessage: { type: string }
+        parentRunId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    ReportResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/ReportSchedule" }
+        meta:
+          type: object
+          required: [source]
+          properties:
+            source: { type: string }
+    ReportListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ReportSchedule" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    ReportRunResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/ReportRun" }
+        meta:
+          type: object
+          additionalProperties: { type: string }
+    ReportRunListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ReportRun" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

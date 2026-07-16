@@ -1,0 +1,375 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Provider Registry API
+  version: 0.1.0
+  description: Non-secret provider metadata, active-probe queueing, passive health observations, maintenance windows, and routing-safety decisions. Credential values and outbound network execution are intentionally out of scope.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Providers
+  - name: Provider health
+paths:
+  /api/v1/providers:
+    get:
+      operationId: listProviders
+      tags: [Providers]
+      parameters:
+        - name: organizationId
+          in: query
+          schema: { type: string, default: org_topoai }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, configuring, healthy, degraded, offline, maintenance] }
+      responses:
+        "200":
+          description: Filtered provider connections without secret values.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderListResponse" }
+    post:
+      operationId: createProvider
+      tags: [Providers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProviderRequest" }
+      responses:
+        "201":
+          description: Provider metadata registered in configuring state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderResponse" }
+        "404":
+          description: Organization not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Provider connection name already exists in the organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Provider metadata is invalid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/provider-health-events:
+    get:
+      operationId: listProviderHealthEvents
+      tags: [Provider health]
+      parameters:
+        - name: organizationId
+          in: query
+          schema: { type: string, default: org_topoai }
+        - name: providerId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, configuring, healthy, degraded, offline, maintenance] }
+        - name: source
+          in: query
+          schema: { type: string, enum: [all, active_probe, passive_telemetry] }
+      responses:
+        "200":
+          description: Provider-health evidence ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderHealthEventListResponse" }
+  /api/v1/provider-health-probes:
+    get:
+      operationId: listProviderHealthProbes
+      tags: [Provider health]
+      parameters:
+        - name: organizationId
+          in: query
+          schema: { type: string, default: org_topoai }
+        - name: providerId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, queued, running, succeeded, failed, cancelled] }
+      responses:
+        "200":
+          description: Active-probe jobs ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderHealthProbeListResponse" }
+  /api/v1/providers/{providerID}/health/probes:
+    post:
+      operationId: queueProviderHealthProbe
+      tags: [Provider health]
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueueProviderProbeRequest" }
+      responses:
+        "202":
+          description: Probe intent persisted for the isolated provider-health worker.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderHealthProbeResponse" }
+        "404":
+          description: Provider not found in the organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Configured provider credentials are required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/providers/{providerID}/health/observations:
+    post:
+      operationId: recordProviderHealthObservation
+      tags: [Provider health]
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordProviderHealthRequest" }
+      responses:
+        "201":
+          description: Observation persisted and provider routing eligibility recomputed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderHealthEventResponse" }
+        "404":
+          description: Provider not found in the organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Source or metrics are outside the accepted contract.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /api/v1/providers/{providerID}/maintenance:
+    post:
+      operationId: setProviderMaintenance
+      tags: [Provider health]
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetProviderMaintenanceRequest" }
+      responses:
+        "200":
+          description: Maintenance state updated. Ending maintenance leaves the provider non-routable until fresh health evidence is recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderResponse" }
+        "404":
+          description: Provider not found in the organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Maintenance reason or time window is invalid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+components:
+  parameters:
+    ProviderID:
+      name: providerID
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    ProviderConnection:
+      type: object
+      required: [id, organizationId, name, provider, baseUrl, status, credentialState, models, p95LatencyMs, successRate, routingEligible, healthSource, healthReason, errorRate, requestCount24h, averageLatencyMs, consecutiveFailures, maintenanceReason, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        provider: { type: string }
+        baseUrl: { type: string, format: uri }
+        status: { type: string, enum: [configuring, healthy, degraded, offline, maintenance] }
+        credentialState: { type: string, enum: [missing, configured, rotating] }
+        models: { type: integer, minimum: 0 }
+        p95LatencyMs: { type: integer, minimum: 0 }
+        successRate: { type: number, minimum: 0, maximum: 100 }
+        lastCheckedAt: { type: [string, "null"], format: date-time }
+        routingEligible: { type: boolean }
+        healthSource: { type: string, enum: [manual, active_probe, passive_telemetry] }
+        healthReason: { type: string }
+        errorRate: { type: number, minimum: 0, maximum: 100 }
+        requestCount24h: { type: integer, minimum: 0 }
+        averageLatencyMs: { type: integer, minimum: 0 }
+        consecutiveFailures: { type: integer, minimum: 0 }
+        lastTransitionAt: { type: [string, "null"], format: date-time }
+        maintenanceUntil: { type: [string, "null"], format: date-time }
+        maintenanceReason: { type: string }
+        createdAt: { type: string, format: date-time }
+    CreateProviderRequest:
+      type: object
+      required: [organizationId, name, provider, baseUrl]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        provider: { type: string, minLength: 1 }
+        baseUrl: { type: string, format: uri, pattern: "^https?://" }
+    ProviderResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/ProviderConnection" }
+        meta:
+          type: object
+          required: [source]
+          properties:
+            source: { type: string }
+    ProviderListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ProviderConnection" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    QueueProviderProbeRequest:
+      type: object
+      required: [organizationId]
+      properties:
+        organizationId: { type: string }
+        region: { type: string, default: automatic }
+        model: { type: string, default: provider-default }
+        requestedBy: { type: string, default: holden@topoai.dev }
+    RecordProviderHealthRequest:
+      type: object
+      required: [organizationId, source, success, requestCount, errorCount, averageLatencyMs, p95LatencyMs]
+      properties:
+        organizationId: { type: string }
+        probeId: { type: [string, "null"] }
+        source: { type: string, enum: [active_probe, passive_telemetry] }
+        success: { type: boolean }
+        requestCount: { type: integer, minimum: 0 }
+        errorCount: { type: integer, minimum: 0 }
+        averageLatencyMs: { type: integer, minimum: 0 }
+        p95LatencyMs: { type: integer, minimum: 0 }
+        httpStatus: { type: [integer, "null"], minimum: 100, maximum: 599 }
+        message: { type: string }
+    SetProviderMaintenanceRequest:
+      type: object
+      required: [organizationId, enabled, until, reason]
+      properties:
+        organizationId: { type: string }
+        enabled: { type: boolean }
+        until:
+          type: [string, "null"]
+          format: date-time
+          description: Required when enabling maintenance; must be in the future and within 30 days.
+        reason: { type: string }
+    ProviderHealthEvent:
+      type: object
+      required: [id, organizationId, providerId, providerName, source, previousStatus, status, transition, success, routingEligible, requestCount, errorCount, errorRate, averageLatencyMs, p95LatencyMs, consecutiveFailures, reason, observedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        providerId: { type: string }
+        providerName: { type: string }
+        probeId: { type: [string, "null"] }
+        source: { type: string, enum: [active_probe, passive_telemetry] }
+        previousStatus: { type: string, enum: [configuring, healthy, degraded, offline, maintenance] }
+        status: { type: string, enum: [configuring, healthy, degraded, offline, maintenance] }
+        transition: { type: boolean }
+        success: { type: boolean }
+        routingEligible: { type: boolean }
+        requestCount: { type: integer, minimum: 0 }
+        errorCount: { type: integer, minimum: 0 }
+        errorRate: { type: number, minimum: 0, maximum: 100 }
+        averageLatencyMs: { type: integer, minimum: 0 }
+        p95LatencyMs: { type: integer, minimum: 0 }
+        httpStatus: { type: [integer, "null"], minimum: 100, maximum: 599 }
+        consecutiveFailures: { type: integer, minimum: 0 }
+        reason: { type: string }
+        observedAt: { type: string, format: date-time }
+    ProviderHealthProbe:
+      type: object
+      required: [id, organizationId, providerId, providerName, status, region, model, requestedBy, requestedAt, errorMessage]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        providerId: { type: string }
+        providerName: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        region: { type: string }
+        model: { type: string }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        eventId: { type: [string, "null"] }
+        errorMessage: { type: string }
+    ProviderHealthEventResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/ProviderHealthEvent" }
+        meta:
+          type: object
+          additionalProperties: { type: string }
+    ProviderHealthEventListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ProviderHealthEvent" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    ProviderHealthProbeResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/ProviderHealthProbe" }
+        meta:
+          type: object
+          additionalProperties: { type: string }
+    ProviderHealthProbeListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ProviderHealthProbe" }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

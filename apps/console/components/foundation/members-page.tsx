@@ -1,0 +1,47 @@
+"use client";
+
+import { Button, Card, Table } from "@heroui/react";
+import { ChevronRight, Fingerprint, KeyRound, Plus, ShieldCheck, UserCheck, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import { Dialog, Field, inputClass, MetricGrid, PageHeader, SearchBar, selectClass, StateBadge, type APIState } from "@/components/foundation/resource-ui";
+import { inviteMember, listMembers } from "@/lib/control-plane";
+import { foundationOrganizationId, seedMembers } from "@/lib/foundation-data";
+import type { Member } from "@/types/foundation";
+
+export function MembersPage() {
+  const [items, setItems] = useState(seedMembers);
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(seedMembers[0]?.id ?? "");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [role, setRole] = useState("developer");
+  const [apiState, setAPIState] = useState<APIState>("connecting");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listMembers(foundationOrganizationId, controller.signal).then(({ data }) => { setItems(data); setSelectedId((current) => data.some((item) => item.id === current) ? current : data[0]?.id ?? ""); setAPIState("connected"); }).catch((error: unknown) => { if (!(error instanceof DOMException && error.name === "AbortError")) setAPIState("fallback"); });
+    return () => controller.abort();
+  }, []);
+
+  const roles = useMemo(() => Array.from(new Set(items.flatMap((item) => item.roles))).sort(), [items]);
+  const filtered = useMemo(() => { const needle = query.trim().toLowerCase(); return items.filter((item) => (roleFilter === "all" || item.roles.includes(roleFilter)) && (!needle || [item.displayName, item.email, item.identityProvider, ...item.roles].some((value) => value.toLowerCase().includes(needle)))); }, [items, query, roleFilter]);
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!email.trim()) return; setAPIState("saving");
+    try { const { data } = await inviteMember({ organizationId: foundationOrganizationId, email: email.trim(), displayName: displayName.trim(), role, invitedBy: "holden@topoai.dev" }); setItems((current) => [data, ...current]); setSelectedId(data.id); setAPIState("connected"); }
+    catch { const fallback: Member = { id: `member_${crypto.randomUUID().slice(0, 8)}`, organizationId: foundationOrganizationId, email: email.trim(), displayName: displayName.trim() || email.split("@")[0], status: "invited", identityProvider: "invitation", roles: [role], lastActiveAt: null, createdAt: new Date().toISOString() }; setItems((current) => [fallback, ...current]); setSelectedId(fallback.id); setAPIState("fallback"); }
+    setEmail(""); setDisplayName(""); setDialogOpen(false);
+  }
+
+  return <div className="mx-auto flex w-full max-w-[1760px] flex-col gap-5">
+    <PageHeader eyebrow="Identity & access" title="Members" description="Manage enterprise identities, invitations, scoped roles, authentication source, and access-review context." icon={Users} apiState={apiState} action={<Button onPress={() => setDialogOpen(true)} className="h-9 gap-2 bg-blue-500 px-3 text-xs text-white"><Plus size={14} /> Invite member</Button>} />
+    <MetricGrid items={[{ label: "Members", value: items.length.toString(), hint: "Current organization", icon: Users }, { label: "Active", value: items.filter((item) => item.status === "active").length.toString(), hint: "Can access resources", icon: UserCheck }, { label: "Privileged", value: items.filter((item) => item.roles.some((roleName) => roleName === "owner" || roleName === "admin")).length.toString(), hint: "Owner or admin", icon: ShieldCheck }, { label: "Federated", value: items.filter((item) => item.identityProvider === "oidc" || item.identityProvider === "saml").length.toString(), hint: "OIDC / SAML identities", icon: Fingerprint }]} />
+    <SearchBar value={query} onChange={setQuery} placeholder="Search name, email, identity provider, or role..." trailing={<select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className={selectClass}><option value="all">All roles</option>{roles.map((item) => <option key={item} value={item}>{item}</option>)}</select>} />
+    <section className={`grid min-w-0 gap-4 ${selected ? "2xl:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}><Card className="glass-panel min-w-0 overflow-hidden px-0 py-0"><Card.Header className="border-b border-white/[0.055] p-4"><Card.Title className="text-sm font-medium text-slate-100">Identity directory</Card.Title><Card.Description className="mt-1 text-xs text-slate-600">{filtered.length} visible identities</Card.Description></Card.Header><Card.Content className="p-0"><Table className="rounded-none border-0 bg-transparent"><Table.ScrollContainer><Table.Content aria-label="Member directory" className="min-w-[820px]"><Table.Header>{[["member", "Member"], ["status", "Status"], ["roles", "Roles"], ["provider", "Identity provider"], ["activity", "Last active"], ["open", ""]].map(([id, label]) => <Table.Column key={id} id={id} className="bg-white/[0.018] text-[10px] font-medium tracking-wide text-slate-600 uppercase">{label}</Table.Column>)}</Table.Header><Table.Body>{filtered.map((item) => <Table.Row key={item.id} id={item.id} onClick={() => setSelectedId(item.id)} className={`cursor-pointer border-t border-white/[0.045] transition hover:bg-white/[0.03] ${selectedId === item.id ? "bg-blue-400/[0.055]" : ""}`}><Table.Cell><p className="text-xs font-medium text-slate-200">{item.displayName}</p><p className="mt-0.5 text-[10px] text-slate-600">{item.email}</p></Table.Cell><Table.Cell><StateBadge value={item.status} /></Table.Cell><Table.Cell><div className="flex flex-wrap gap-1">{item.roles.map((itemRole) => <span key={itemRole} className="rounded-md bg-white/[0.035] px-2 py-1 text-[9px] capitalize text-slate-400 ring-1 ring-inset ring-white/[0.055]">{itemRole}</span>)}</div></Table.Cell><Table.Cell className="text-xs uppercase text-slate-400">{item.identityProvider}</Table.Cell><Table.Cell className="text-[11px] text-slate-500">{item.lastActiveAt ? new Date(item.lastActiveAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "Invitation pending"}</Table.Cell><Table.Cell><ChevronRight className="ml-auto text-slate-700" size={14} /></Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table></Card.Content></Card>{selected && <aside className="glass-panel sticky top-[76px] max-h-[calc(100vh-100px)] overflow-y-auto"><div className="border-b border-white/[0.06] p-5"><div className="flex items-center justify-between"><span className="rounded-xl bg-blue-400/10 p-2 text-blue-300"><Users size={17} /></span><StateBadge value={selected.status} /></div><h2 className="mt-4 text-base font-semibold text-white">{selected.displayName}</h2><p className="mt-1 text-[10px] text-slate-600">{selected.email}</p></div><div className="space-y-5 p-5"><section><p className="mb-2 text-[10px] font-medium tracking-wider text-slate-500 uppercase">Role bindings</p><div className="flex flex-wrap gap-1.5">{selected.roles.map((itemRole) => <span key={itemRole} className="rounded-lg bg-blue-400/[0.055] px-2.5 py-1.5 text-[10px] capitalize text-blue-200 ring-1 ring-inset ring-blue-400/10">{itemRole}</span>)}</div></section><dl className="space-y-3 text-[11px]">{[["Identity provider", selected.identityProvider.toUpperCase()], ["Organization", selected.organizationId], ["Last active", selected.lastActiveAt ? new Date(selected.lastActiveAt).toLocaleString("zh-CN") : "Never"], ["Joined", new Date(selected.createdAt).toLocaleDateString("zh-CN")]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-slate-600">{label}</dt><dd className="truncate text-slate-300">{value}</dd></div>)}</dl><Button variant="tertiary" className="h-9 w-full gap-2 border border-white/8 bg-white/[0.025] text-xs text-slate-300"><KeyRound size={13} /> Review access</Button></div></aside>}</section>
+    {dialogOpen && <Dialog title="Invite member" description="Create an invited identity and scoped organization role." submitLabel="Send invitation" canSubmit={Boolean(email.trim() && email.includes("@"))} onClose={() => setDialogOpen(false)} onSubmit={submit}><Field label="Email address"><input autoFocus type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" className={inputClass} /></Field><Field label="Display name"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Optional" className={inputClass} /></Field><Field label="Organization role"><select value={role} onChange={(event) => setRole(event.target.value)} className={selectClass}><option value="viewer">Viewer</option><option value="developer">Developer</option><option value="admin">Admin</option><option value="owner">Owner</option></select></Field><div className="rounded-xl border border-amber-400/12 bg-amber-400/[0.035] p-3 text-[11px] leading-5 text-amber-100/70">Owners and admins can change gateway policy and credentials. Assign privileged roles only after access review.</div></Dialog>}
+  </div>;
+}

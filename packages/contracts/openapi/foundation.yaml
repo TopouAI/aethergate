@@ -1,0 +1,340 @@
+openapi: 3.1.0
+info:
+  title: AetherGate Foundation Resources API
+  version: 0.1.0
+  description: Executable contract for workspace, project, member, and enterprise model catalog endpoints.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Workspaces
+  - name: Projects
+  - name: Members
+  - name: Models
+paths:
+  /api/v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      tags: [Workspaces]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+      responses:
+        "200":
+          description: Workspaces in the selected organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceListResponse" }
+    post:
+      operationId: createWorkspace
+      tags: [Workspaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWorkspaceRequest" }
+      responses:
+        "201":
+          description: Workspace created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/projects:
+    get:
+      operationId: listProjects
+      tags: [Projects]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: workspaceId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Projects in the selected scope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectListResponse" }
+    post:
+      operationId: createProject
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProjectRequest" }
+      responses:
+        "201":
+          description: Project created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/members:
+    get:
+      operationId: listMembers
+      tags: [Members]
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+      responses:
+        "200":
+          description: Members in the selected organization.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberListResponse" }
+    post:
+      operationId: inviteMember
+      tags: [Members]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteMemberRequest" }
+      responses:
+        "201":
+          description: Invited member record created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/models:
+    get:
+      operationId: listModels
+      tags: [Models]
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: provider
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, active, preview, deprecated, disabled] }
+      responses:
+        "200":
+          description: Filtered enterprise model catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelListResponse" }
+    post:
+      operationId: upsertModel
+      tags: [Models]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertModelRequest" }
+      responses:
+        "200":
+          description: Model definition created or updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+components:
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: query
+      schema: { type: string, default: org_topoai }
+  responses:
+    NotFound:
+      description: Parent resource does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: A resource with the same scoped identifier already exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ValidationError:
+      description: Resource input is invalid.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+  schemas:
+    Workspace:
+      type: object
+      required: [id, organizationId, name, slug, status, environment, projects, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [active, suspended] }
+        environment: { type: string, enum: [development, staging, production, shared] }
+        projects: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    CreateWorkspaceRequest:
+      type: object
+      required: [organizationId, name, environment]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        slug: { type: string }
+        environment: { type: string, enum: [development, staging, production, shared] }
+    Project:
+      type: object
+      required: [id, organizationId, workspaceId, workspace, name, slug, status, owner, budgetUsd, monthlyCostUsd, requests, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        workspaceId: { type: string }
+        workspace: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        status: { type: string, enum: [active, archived] }
+        owner: { type: string }
+        budgetUsd: { type: number, minimum: 0 }
+        monthlyCostUsd: { type: number, minimum: 0 }
+        requests: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    CreateProjectRequest:
+      type: object
+      required: [organizationId, workspaceId, name]
+      properties:
+        organizationId: { type: string }
+        workspaceId: { type: string }
+        name: { type: string, minLength: 1 }
+        slug: { type: string }
+        owner: { type: string, format: email }
+        budgetUsd: { type: number, minimum: 0 }
+    Member:
+      type: object
+      required: [id, organizationId, email, displayName, status, identityProvider, roles, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        status: { type: string, enum: [active, invited, suspended] }
+        identityProvider: { type: string, enum: [oidc, saml, password, invitation, local] }
+        roles:
+          type: array
+          items: { type: string }
+        lastActiveAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    InviteMemberRequest:
+      type: object
+      required: [organizationId, email, role]
+      properties:
+        organizationId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        role: { type: string, enum: [viewer, analyst, billing, developer, admin, owner] }
+        invitedBy: { type: string, format: email }
+    Model:
+      type: object
+      required: [id, provider, displayName, status, contextWindow, maxOutputTokens, inputPricePerMillion, outputPricePerMillion, supportsTools, supportsVision, supportsJson, regions, createdAt]
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [active, preview, deprecated, disabled] }
+        contextWindow: { type: integer, minimum: 1 }
+        maxOutputTokens: { type: integer, minimum: 1 }
+        inputPricePerMillion: { type: number, minimum: 0 }
+        outputPricePerMillion: { type: number, minimum: 0 }
+        supportsTools: { type: boolean }
+        supportsVision: { type: boolean }
+        supportsJson: { type: boolean }
+        regions:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    UpsertModelRequest:
+      type: object
+      required: [id, provider, displayName, status, contextWindow, maxOutputTokens, inputPricePerMillion, outputPricePerMillion, supportsTools, supportsVision, supportsJson, regions]
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [active, preview, deprecated, disabled] }
+        contextWindow: { type: integer, minimum: 1 }
+        maxOutputTokens: { type: integer, minimum: 1 }
+        inputPricePerMillion: { type: number, minimum: 0 }
+        outputPricePerMillion: { type: number, minimum: 0 }
+        supportsTools: { type: boolean }
+        supportsVision: { type: boolean }
+        supportsJson: { type: boolean }
+        regions:
+          type: array
+          items: { type: string }
+    WorkspaceResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/Workspace" }
+        meta: { $ref: "#/components/schemas/SourceMeta" }
+    ProjectResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/Project" }
+        meta: { $ref: "#/components/schemas/SourceMeta" }
+    MemberResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/Member" }
+        meta: { $ref: "#/components/schemas/SourceMeta" }
+    ModelResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/Model" }
+        meta: { $ref: "#/components/schemas/SourceMeta" }
+    WorkspaceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ListEnvelope"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Workspace" } }
+    ProjectListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ListEnvelope"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Project" } }
+    MemberListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ListEnvelope"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Member" } }
+    ModelListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ListEnvelope"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/Model" } }
+    ListEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: {} }
+        meta:
+          type: object
+          required: [count, source]
+          properties:
+            count: { type: integer, minimum: 0 }
+            source: { type: string }
+    SourceMeta:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

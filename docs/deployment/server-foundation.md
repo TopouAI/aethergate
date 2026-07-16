@@ -53,12 +53,14 @@ DATABASE_URL=postgresql://aethergate_user:<password>@pgbouncer:5432/aethergate
 DIRECT_URL=postgresql://aethergate_user:<password>@postgres:5432/aethergate
 LITELLM_BASE_URL=http://litellm:4000
 LITELLM_MASTER_KEY=<server-side-master-key>
+AETHERGATE_VAULT_KEK=<standard-base64-of-32-random-bytes>
 ```
 
 - `DATABASE_URL`: normal AetherGate runtime traffic through PgBouncer transaction pooling.
 - `DIRECT_URL`: schema migrations and operations requiring a direct PostgreSQL session.
 - `LITELLM_BASE_URL`: internal Compose-network address.
 - `LITELLM_MASTER_KEY`: privileged server-side integration credential; never expose it to the Console browser.
+- `AETHERGATE_VAULT_KEK`: key-encryption key for persistent Vault writes; standard Base64 of exactly 32 random bytes, loaded only by the Go API and authorized internal workers.
 
 LiteLLM should initially connect directly to PostgreSQL because startup and schema operations may need session behavior. Evaluate a PgBouncer session pool only after testing the exact pinned LiteLLM version. Do not route migrations through a transaction pool.
 
@@ -122,8 +124,10 @@ The initialization script should create strong random values for:
 - LiteLLM master and salt keys;
 - LiteLLM UI credentials;
 - the generated AetherGate backend environment.
+- a 32-byte AetherGate Vault KEK, standard-Base64 encoded and stored in the server secret boundary.
 
 The LiteLLM salt key protects encrypted provider credentials. Do not casually regenerate or change it after credentials are stored.
+The current AetherGate Vault key boundary uses one `env-v1` wrapping key. Back it up through the approved secret manager and do not replace it after Vault data exists: existing data keys cannot be decrypted until a reviewed multi-key rewrap procedure is implemented and exercised.
 
 Validate the resolved Compose configuration before pulling or starting services:
 
@@ -176,11 +180,71 @@ Confirm endpoints against the imported LiteLLM version and `verify.sh`; do not t
 
 When AetherGate API joins the same Compose network, use the internal values generated in `aethergate-backend.env`. Load them into the API container through Compose `env_file` or secret handling; do not copy them into frontend configuration.
 
+Configure the LiteLLM integration only in the Go API server environment:
+
+```dotenv
+LITELLM_BASE_URL=http://litellm:4000
+LITELLM_MASTER_KEY=<server-only-master-key>
+```
+
+`LITELLM_BASE_URL` must be an absolute HTTP(S) URL without embedded credentials, query, or fragment. `LITELLM_MASTER_KEY` is optional for an unauthenticated health endpoint, but when set it remains server-side and is never returned to the Console. Do not use either value in a `NEXT_PUBLIC_*` variable.
+
+After the Go API starts, verify the sanitized configuration and then run a live probe from the API's network:
+
+```bash
+curl -fsS http://aethergate-api:8080/api/v1/integrations/litellm/status
+curl -fsS -X POST http://aethergate-api:8080/api/v1/integrations/litellm/verify
+```
+
+The verification endpoint calls only LiteLLM's `/health/liveliness` and `/health/readiness`, rejects redirects, discards a bounded response body, and returns status/latency evidence without the credential. It does not access LiteLLM database tables. Treat `overall: ready` as a service-health gate only; still test real streaming, cancellation, virtual-key policy, routing, usage attribution, and provider failure behavior before promotion.
+
 When the Go API runs on a developer workstation, prefer one of these patterns:
 
 1. run the API in the server Compose network;
 2. use an SSH tunnel to the host-local PgBouncer port;
 3. use a separate development database reachable only through a VPN or trusted network.
+
+Provider-health execution has an additional trust boundary:
+
+- the Go control-plane API persists probe jobs and accepts aggregated observations;
+- a separate provider-health worker reads queued jobs, resolves credentials through the server-side secret boundary, performs allow-listed provider checks, and records results;
+- the Console never receives provider secrets and never makes direct provider probes;
+- do not enable automatic probe dispatch until worker egress allow-lists, timeouts, credential access, audit emission, and retry limits are configured.
+
+Scheduled-report execution has a separate data and delivery boundary:
+
+- the Go control-plane API stores schedules, calculates timezone-aware next runs, and queues run records;
+- a Reports Worker claims due/manual/retry jobs, reads authorized analytics data, generates CSV/XLSX/PDF artifacts, stores artifact metadata, and delivers to approved email or Slack recipients;
+- object-storage, SMTP, and Slack credentials stay server-side and never enter Console configuration;
+- enable the worker only after tenant-scoped queries, object retention, malware/content checks where applicable, signed-download policy, recipient authorization, idempotency, and retry limits are configured.
+
+External notification delivery has a separate identity and egress boundary:
+
+- the Go control-plane API always creates the recipient-scoped inbox item and only queues, defers, or suppresses external delivery records according to validated personal preferences;
+- a Notifications Worker claims eligible records, resolves approved server-side email/Slack/Teams/webhook connector references, applies idempotency and retry limits, and writes outcome evidence;
+- quiet hours and digest availability are calculated in the recipient's IANA timezone, while durable timestamps remain UTC;
+- connector credentials and raw webhook secrets never enter the Console, notification preference payloads, or control-plane logs;
+- enable external delivery only after recipient authorization, destination allow-lists, secret rotation, template escaping, rate limits, bounce/failure handling, replay protection, retention, and audit emission are configured.
+
+Enterprise Vault has a separate encryption and resolution boundary:
+
+- each secret version uses a fresh random 256-bit data key; AES-256-GCM protects both secret material and the data key, with tenant/secret/version authenticated as additional data;
+- the Console and public HTTP responses receive only masked metadata, fingerprint, version, reference, rotation state, and access evidence; they never receive plaintext, ciphertext, nonces, or wrapped data keys;
+- plaintext resolution is an internal Go service method only. A worker must provide actor, workload, purpose, request ID, and source IP, and every success/denial/failure is appended to immutable access evidence;
+- production PostgreSQL writes fail closed when `AETHERGATE_VAULT_KEK` is missing or invalid. Keep this KEK outside Git and database backups, but back it up in the approved secret manager with separate access control;
+- the current single `env-v1` wrapping key is not a full KMS/key ring. Do not rotate it in place until rewrap code, dual-key reads, rollback, and restore drills are implemented;
+- provider-health, gateway, webhook, reports, and notifications workers must resolve only their explicitly scoped reference and must never log or persist returned plaintext;
+- do not mark Vault verified until auth/RBAC, live PostgreSQL, real worker resolution, external KMS/key ring, backup/restore, revocation propagation, and compromise-response exercises pass.
+
+Audit evidence has an append-only storage and privileged-worker boundary:
+
+- the Go control plane appends complete actor/action/resource/outcome/risk/request/IP and before/after evidence to a tenant-specific SHA-256 forward chain;
+- the PostgreSQL application role must never receive a bypass path around the `audit_events` mutation trigger, and operators must alert on rejected mutation attempts or chain-verification failures;
+- the Audit Export Worker is the only component that reads an accepted export job, creates CSV/JSONL objects, calculates the SHA-256 object checksum, and records row count, size, object key, and completion/failure evidence;
+- export buckets must be private, encrypted, tenant-prefixed, lifecycle-controlled, and accessed through short-lived authorization; connector or object credentials never enter the Console;
+- retention and legal hold are policy records. Physical expiry must use a reviewed privileged partition-retention worker or partition-drop procedure that logs its decision and can never delete evidence under legal hold;
+- back up audit partitions and policy/export evidence before schema or retention changes, then verify the restored chain in an isolated environment;
+- do not enable export or physical expiry until identity/RBAC, tenant-scoped reads, object retention, retry/idempotency, monitoring, and restore drills pass.
 
 Do not publish PostgreSQL to the entire internet for convenience.
 

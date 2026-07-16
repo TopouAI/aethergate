@@ -1,0 +1,91 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+@theme {
+  --font-sans: "Inter", "SF Pro Display", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+  --color-aether-400: #70a7ff;
+  --color-aether-500: #4c84ff;
+  --color-aether-600: #3368ea;
+}
+
+:root {
+  color-scheme: dark;
+  --shell-background: #05070b;
+  --shell-panel: #0b0f17;
+  --shell-panel-strong: #101622;
+  --shell-border: rgba(148, 163, 184, 0.13);
+  --shell-muted: #8b96aa;
+  --shell-text: #f4f7fb;
+  --shell-accent: #70a7ff;
+  --shell-success: #5de2a5;
+  --shell-warning: #f5c76a;
+  --shell-danger: #ff7f8c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--shell-background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 72% -20%, rgba(76, 132, 255, 0.13), transparent 38%),
+    radial-gradient(circle at 15% 110%, rgba(90, 226, 165, 0.07), transparent 34%),
+    var(--shell-background);
+  color: var(--shell-text);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(112, 167, 255, 0.35);
+  color: white;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.24);
+  background-clip: padding-box;
+}
+
+.surface-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.glass-panel {
+  border: 1px solid var(--shell-border);
+  background: linear-gradient(145deg, rgba(16, 22, 34, 0.92), rgba(8, 12, 19, 0.9));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.metric-glow {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 16px 40px rgba(0, 0, 0, 0.18);
+}
+

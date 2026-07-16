@@ -1,0 +1,117 @@
+openapi: 3.1.0
+info: { title: AetherGate Budgets API, version: 0.1.0, description: Hierarchical budget lifecycle and forecast dry-run decisions. Billing reconciliation is a separate integration gate. }
+servers: [{ url: http://localhost:8080 }]
+tags: [{ name: Budgets }]
+paths:
+  /api/v1/budgets:
+    get:
+      operationId: listBudgets
+      tags: [Budgets]
+      parameters:
+        - { name: organizationId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [all, draft, active, paused] } }
+        - { name: scopeType, in: query, schema: { type: string, enum: [all, organization, workspace, project] } }
+      responses:
+        "200": { description: Budget list., content: { application/json: { schema: { $ref: "#/components/schemas/BudgetListResponse" } } } }
+    post:
+      operationId: createBudget
+      tags: [Budgets]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateBudgetRequest" } } } }
+      responses:
+        "201": { description: Draft budget., content: { application/json: { schema: { $ref: "#/components/schemas/BudgetResponse" } } } }
+        "422": { description: Invalid thresholds., content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /api/v1/budgets/{budgetId}/activate:
+    post:
+      operationId: activateBudget
+      tags: [Budgets]
+      parameters: [{ name: budgetId, in: path, required: true, schema: { type: string } }, { name: organizationId, in: query, schema: { type: string } }]
+      responses: { "200": { description: Active budget., content: { application/json: { schema: { $ref: "#/components/schemas/BudgetResponse" } } } } }
+  /api/v1/budgets/{budgetId}/pause:
+    post:
+      operationId: pauseBudget
+      tags: [Budgets]
+      parameters: [{ name: budgetId, in: path, required: true, schema: { type: string } }, { name: organizationId, in: query, schema: { type: string } }]
+      responses: { "200": { description: Paused budget., content: { application/json: { schema: { $ref: "#/components/schemas/BudgetResponse" } } } } }
+  /api/v1/budgets/evaluate:
+    post:
+      operationId: evaluateBudget
+      tags: [Budgets]
+      summary: Forecast and evaluate inherited budgets without mutating billing state
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BudgetEvaluationRequest" } } } }
+      responses: { "200": { description: Budget decision., content: { application/json: { schema: { $ref: "#/components/schemas/BudgetDecisionResponse" } } } } }
+components:
+  schemas:
+    Budget:
+      type: object
+      required: [id, organizationId, name, status, scopeType, scopeId, period, limitUsd, warningPercent, criticalPercent, action, spentUsd, committedUsd, forecastUsd, startsAt, endsAt, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [draft, active, paused] }
+        scopeType: { type: string, enum: [organization, workspace, project] }
+        scopeId: { type: string }
+        period: { type: string, enum: [monthly, quarterly, annual] }
+        limitUsd: { type: number, exclusiveMinimum: 0 }
+        warningPercent: { type: integer, minimum: 1, maximum: 99 }
+        criticalPercent: { type: integer, minimum: 2, maximum: 100 }
+        action: { type: string, enum: [alert, block, approval] }
+        spentUsd: { type: number, minimum: 0 }
+        committedUsd: { type: number, minimum: 0 }
+        forecastUsd: { type: number, minimum: 0 }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateBudgetRequest:
+      type: object
+      required: [organizationId, name, scopeType, scopeId, period, limitUsd, warningPercent, criticalPercent, action]
+      properties:
+        organizationId: { type: string }
+        name: { type: string, minLength: 1 }
+        scopeType: { type: string, enum: [organization, workspace, project] }
+        scopeId: { type: string }
+        period: { type: string, enum: [monthly, quarterly, annual] }
+        limitUsd: { type: number, exclusiveMinimum: 0 }
+        warningPercent: { type: integer }
+        criticalPercent: { type: integer }
+        action: { type: string, enum: [alert, block, approval] }
+    BudgetEvaluationRequest:
+      type: object
+      required: [organizationId, currentSpendUsd, proposedSpendUsd, elapsedPercent]
+      properties:
+        organizationId: { type: string }
+        workspaceId: { type: string }
+        projectId: { type: string }
+        currentSpendUsd: { type: number, minimum: 0 }
+        proposedSpendUsd: { type: number, minimum: 0 }
+        elapsedPercent: { type: number, exclusiveMinimum: 0, maximum: 100 }
+    BudgetMatch:
+      type: object
+      required: [budgetId, budgetName, scopeType, scopeId, action, limitUsd, projectedSpendUsd, forecastUsd, utilizationPercent, threshold, remainingUsd]
+      properties:
+        budgetId: { type: string }
+        budgetName: { type: string }
+        scopeType: { type: string }
+        scopeId: { type: string }
+        action: { type: string }
+        limitUsd: { type: number }
+        projectedSpendUsd: { type: number }
+        forecastUsd: { type: number }
+        utilizationPercent: { type: number }
+        threshold: { type: string, enum: [healthy, warning, critical] }
+        remainingUsd: { type: number }
+    BudgetDecision:
+      type: object
+      required: [allowed, requiresApproval, mode, reason, matches]
+      properties:
+        allowed: { type: boolean }
+        requiresApproval: { type: boolean }
+        mode: { type: string, const: dry-run }
+        reason: { type: string }
+        matches: { type: array, items: { $ref: "#/components/schemas/BudgetMatch" } }
+    BudgetResponse: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/Budget" }, meta: { type: object, additionalProperties: { type: string } } } }
+    BudgetListResponse: { type: object, required: [data, meta], properties: { data: { type: array, items: { $ref: "#/components/schemas/Budget" } }, meta: { type: object, additionalProperties: true } } }
+    BudgetDecisionResponse: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/BudgetDecision" }, meta: { type: object, additionalProperties: { type: string } } } }
+    ErrorResponse: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } } }
